@@ -1,0 +1,144 @@
+{
+  "name": "vscode-fabric-supersat",
+  "displayName": "Fabric Supersat",
+  "description": "A Microsoft Fabric VS Code extension that takes a source code first approach.",
+  "version": "0.0.1",
+  "publisher": "vscode-fabric-supersat",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat.git"
+  },
+  "private": true,
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/node/extension.js",
+  "browser": "./dist/web/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": true,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "fabric-supersat.showLog",
+        "title": "Show Log",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.openSettings",
+        "title": "Open Settings",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.signIn",
+        "title": "Sign In to Fabric",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.signOut",
+        "title": "Sign Out of Fabric",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.switchTenant",
+        "title": "Switch Tenant",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.listNotebooks",
+        "title": "List Notebooks",
+        "category": "Fabric Supersat"
+      }
+    ],
+    "configuration": {
+      "title": "Fabric Supersat",
+      "properties": {
+        "fabric-supersat.auth.method": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "azureCli",
+            "vscode",
+            "token"
+          ],
+          "enumItemLabels": [
+            "Auto",
+            "Azure CLI",
+            "VS Code (app registration)",
+            "Pasted token"
+          ],
+          "markdownEnumDescriptions": [
+            "**Desktop:** Azure CLI. **Web:** VS Code sign-in if `#fabric-supersat.auth.clientId#` is set, otherwise a pasted token.",
+            "Use your `az login` account. No app registration needed. Desktop only: the Azure CLI must be installed where the extension runs (on the remote machine for SSH, WSL and containers).",
+            "Sign in through VS Code's Accounts menu with your own Microsoft Entra app registration (`#fabric-supersat.auth.clientId#`). Works on desktop and web.",
+            "Paste an access token obtained elsewhere. Stored in VS Code's secret storage until it expires (about an hour). Works on desktop and web."
+          ],
+          "markdownDescription": "How to sign in to Microsoft Fabric. See *Signing in to Fabric* in the README."
+        },
+        "fabric-supersat.auth.clientId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Application (client) ID of your Microsoft Entra app registration. **Required for the `vscode` sign-in method** (VS Code's built-in app is not authorized for the Fabric API). See *Signing in to Fabric* in the README."
+        },
+        "fabric-supersat.auth.tenant": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Microsoft Entra tenant ID or domain, e.g. `contoso.onmicrosoft.com`. Used by the `azureCli` and `vscode` sign-in methods. Leave empty for your default tenant, or use **Fabric Supersat: Switch Tenant** to pick one. Required for single-tenant app registrations with the `vscode` method."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.mjs",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.mjs --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.mjs --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "compile-tests": "tsc -p . --outDir out",
+    "pretest": "npm run compile-tests && npm run compile",
+    "test": "vscode-test",
+    "pretest:web": "npm run compile",
+    "test:web": "vscode-test-web --browserType=chromium --headless --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test/index.js",
+    "run:web": "vscode-test-web --browserType=chromium --extensionDevelopmentPath=. .",
+    "vsce:package": "vsce package",
+    "icon": "node scripts/render-icon.mjs"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.100.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/test-web": "^0.0.81",
+    "@vscode/vsce": "^4.1.0",
+    "assert": "^2.1.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.0",
+    "mocha": "^12.0.3",
+    "npm-run-all2": "^8.0.4",
+    "playwright": "^1.65.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.2"
+  },
+  "overrides": {
+    "@vscode/test-cli": {
+      "mocha": {
+        "serialize-javascript": "^7.1.4",
+        "diff": "^8.0.3"
+      }
+    }
+  }
+}

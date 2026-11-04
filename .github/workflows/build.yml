@@ -1,0 +1,55 @@
+name: Build VSIX
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22 # @vscode/vsce 4.x requires Node >= 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `vsce package` runs the `vscode:prepublish` script first:
+      # type-check, lint, then the minified production build of both bundles.
+      # File name: <name>-<version>+<short sha>.vsix (semver build metadata), e.g.
+      # vscode-fabric-supersat-0.0.1+1a2b3c4.vsix. package.json's version is left as-is,
+      # since the Marketplace only accepts plain major.minor.patch there.
+      - name: Package
+        id: package
+        env:
+          # For PRs, github.sha is a temporary merge commit; use the PR's head commit instead.
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          vsix="${name}-${version}+${COMMIT_SHA::7}.vsix"
+          npx vsce package --out "$vsix"
+          echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.vsix }}
+          path: ${{ steps.package.outputs.vsix }}
+          if-no-files-found: error

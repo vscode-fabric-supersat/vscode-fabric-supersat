@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Source for icon.png. Re-render with: node scripts/render-icon.mjs -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b4b"/>
+      <stop offset="1" stop-color="#3730a3"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+
+  <!-- stars -->
+  <g fill="#e0e7ff">
+    <circle cx="44" cy="52" r="3"/>
+    <circle cx="206" cy="40" r="2.5"/>
+    <circle cx="218" cy="200" r="3"/>
+    <circle cx="58" cy="210" r="2"/>
+  </g>
+
+  <!-- orbit -->
+  <ellipse cx="128" cy="128" rx="104" ry="44" fill="none" stroke="#a5b4fc"
+           stroke-opacity="0.45" stroke-width="6" transform="rotate(-24 128 128)"/>
+
+  <!-- satellite -->
+  <g transform="rotate(-38 128 128)">
+    <!-- struts -->
+    <rect x="62" y="124" width="132" height="8" fill="#c7d2fe"/>
+
+    <!-- woven solar panels: alternating over/under strips -->
+    <g id="panelL">
+      <rect x="22" y="96" width="62" height="64" rx="6" fill="url(#panel)"/>
+      <g fill="#ecfeff" fill-opacity="0.9">
+        <rect x="30" y="104" width="22" height="10" rx="2"/>
+        <rect x="54" y="116" width="22" height="10" rx="2"/>
+        <rect x="30" y="130" width="22" height="10" rx="2"/>
+        <rect x="54" y="142" width="22" height="10" rx="2"/>
+      </g>
+      <g fill="#164e63" fill-opacity="0.55">
+        <rect x="54" y="104" width="22" height="10" rx="2"/>
+        <rect x="30" y="116" width="22" height="10" rx="2"/>
+        <rect x="54" y="130" width="22" height="10" rx="2"/>
+        <rect x="30" y="142" width="22" height="10" rx="2"/>
+      </g>
+    </g>
+    <use href="#panelL" transform="translate(150 0)"/>
+
+    <!-- body -->
+    <rect x="102" y="102" width="52" height="52" rx="10" fill="#f8fafc"/>
+    <rect x="112" y="112" width="32" height="32" rx="6" fill="#f59e0b"/>
+    <circle cx="128" cy="128" r="7" fill="#fff7ed"/>
+
+    <!-- antenna -->
+    <rect x="125" y="72" width="6" height="30" fill="#f8fafc"/>
+    <circle cx="128" cy="68" r="8" fill="#f59e0b"/>
+  </g>
+</svg>
