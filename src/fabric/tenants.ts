@@ -30,6 +30,7 @@ export async function listTenants(
       throw new Error(`Refusing to follow ${url}`);
     }
     const response = await fetchFn(url, {
+      redirect: 'error', // Keep the token on Azure Resource Manager.
       headers: { Authorization: `Bearer ${await getToken()}`, Accept: 'application/json' },
     });
     if (!response.ok) {

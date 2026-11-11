@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat/schemas/notebook-settings.schema.json",
+  "title": "Fabric Supersat notebook settings",
+  "description": "Notebook settings in src/fabric-supersat.yaml. Commit this file with your notebooks: everyone using the project uploads with these settings, in every mode, Restricted Mode included.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "notebooks": {
+      "description": "Notebook lakehouse and environment references. These override the VS Code settings of the same names (fabric-supersat.notebooks.*); they are written with the current VS Code settings when this file is created (the first time notebooks are downloaded, created or uploaded), and a value removed from here uses the VS Code setting.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upload": {
+          "description": "What uploading does with each kind of reference.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultLakehouse": {
+              "description": "On upload: \"replace\" points the default lakehouse at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "otherLakehouses": {
+              "description": "On upload: \"replace\" points the other attached lakehouses (looked up in the default lakehouse's workspace) at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "environment": {
+              "description": "On upload: \"replace\" points the environment at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            }
+          }
+        },
+        "currentWorkspace": {
+          "description": "Which references to save as \"current workspace\". Other lakehouses have no workspace field.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultLakehouse": {
+              "description": "true saves the default lakehouse's workspace as \"current workspace\" (all zeros, meaning the workspace the notebook runs in) where it is the workspace downloaded from or uploaded to: in downloaded notebooks, and when upload writes new IDs to the local files.",
+              "type": "boolean"
+            },
+            "environment": {
+              "description": "true saves the environment's workspace as \"current workspace\" (all zeros, meaning the workspace the notebook runs in) where it is the workspace downloaded from or uploaded to: in downloaded notebooks, and when upload writes new IDs to the local files.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

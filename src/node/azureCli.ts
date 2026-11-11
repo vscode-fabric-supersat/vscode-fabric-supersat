@@ -1,7 +1,9 @@
 // Desktop only (Node.js extension host): runs the Azure CLI. Never import from shared code.
 import { execFile } from 'node:child_process';
-import { ID_PREFIX } from '../constants';
+import { accessSync, constants, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { accountLabel, decodeJwt } from '../auth/jwt';
+import { SAFE_TENANT } from '../auth/settings';
 import { AuthError, type Resource, type TokenProvider } from '../auth/types';
 
 /** Resource URIs passed to `az account get-access-token --resource`. */
@@ -21,13 +23,11 @@ export type ExecFn = (file: string, args: readonly string[]) => Promise<ExecResu
 /** Refresh tokens this long before they expire. */
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const INSTALL_URL = 'https://learn.microsoft.com/cli/azure/install-azure-cli';
-/** Tenant IDs and domains only; keeps the argument safe even when a shell is used (Windows). */
-const SAFE_TENANT = /^[A-Za-z0-9.-]{1,256}$/;
 /** `az login` commands suggested by the CLI that are safe to run in a terminal. */
 const SAFE_LOGIN_COMMAND = /^az login(?: --[a-z-]+(?: "?[A-Za-z0-9.:/_-]+"?)?)*$/;
 
 export interface AzureCliOptions {
-  /** Current `auth.tenant` setting ('' for the CLI's default). */
+  /** Current sign-in tenant ('' for the CLI's default). Re-checked against `SAFE_TENANT`, since a shell is used on Windows. */
   getTenant: () => string;
   /**
    * True when `az login` can't complete a browser sign-in on this machine (remote
@@ -35,6 +35,8 @@ export interface AzureCliOptions {
    * `az login` then uses `--use-device-code`.
    */
   preferDeviceCode?: boolean;
+  /** Finds the Azure CLI's full path (default: `findExecutable('az')` on `PATH`), or `undefined` if it isn't installed. */
+  findAz?: () => string | undefined;
   exec?: ExecFn;
   now?: () => number;
 }
@@ -53,17 +55,19 @@ interface AzTokenOutput {
 export class AzureCliTokenProvider implements TokenProvider {
   readonly method = 'azureCli';
   readonly label = 'Azure CLI';
-  readonly supportsTenantSwitching = true;
+  readonly canListTenants = true;
 
   private readonly cache = new Map<string, { token: string; expiresAt: number }>();
   private readonly getTenant: () => string;
   private readonly preferDeviceCode: boolean;
+  private readonly findAz: () => string | undefined;
   private readonly exec: ExecFn;
   private readonly now: () => number;
 
   constructor(options: AzureCliOptions) {
     this.getTenant = options.getTenant;
     this.preferDeviceCode = options.preferDeviceCode ?? false;
+    this.findAz = options.findAz ?? (() => findExecutable('az'));
     this.exec = options.exec ?? defaultExec;
     this.now = options.now ?? Date.now;
   }
@@ -71,9 +75,7 @@ export class AzureCliTokenProvider implements TokenProvider {
   async getToken(resource: Resource): Promise<string> {
     const tenant = this.getTenant();
     if (tenant && !SAFE_TENANT.test(tenant)) {
-      throw new AuthError(`"${tenant}" is not a valid tenant ID or domain.`, {
-        setting: `${ID_PREFIX}.auth.tenant`,
-      });
+      throw new AuthError(`"${tenant}" is not a valid tenant ID or domain.`, { configureSignIn: true });
     }
     const key = `${resource}|${tenant}`;
     const cached = this.cache.get(key);
@@ -87,13 +89,19 @@ export class AzureCliTokenProvider implements TokenProvider {
     }
     let output: AzTokenOutput;
     try {
-      const { stdout } = await this.exec('az', args);
+      // Run by its full path, found only in PATH's absolute folders: never an `az` in the
+      // current folder (which cmd.exe would otherwise run first), e.g. one in an untrusted repo.
+      const az = this.findAz();
+      if (!az) {
+        throw Object.assign(new Error('The Azure CLI (az) was not found on PATH.'), { code: 'ENOENT' });
+      }
+      const { stdout } = await this.exec(az, args);
       output = JSON.parse(stdout) as AzTokenOutput;
     } catch (err) {
       throw toAuthError(err, { tenant, preferDeviceCode: this.preferDeviceCode });
     }
     if (!output.accessToken) {
-      throw new AuthError('The Azure CLI returned no access token.');
+      throw new AuthError('The Azure CLI returned no access token.', {}, { unexpected: true });
     }
     this.cache.set(key, { token: output.accessToken, expiresAt: expiryMs(output) });
     return output.accessToken;
@@ -156,12 +164,12 @@ export function toAuthError(
   if (e.code === 'ENOENT' || /'az' is not recognized|az: (command )?not found/i.test(stderr)) {
     return new AuthError(
       `The Azure CLI isn't installed (or isn't on the PATH of the machine running the VS Code ${preferDeviceCode ? 'remote ' : ''}extension host). ` +
-        `Install it, or choose another sign-in method in "${ID_PREFIX}.auth.method".`,
-      { link: { label: 'Install Azure CLI', url: INSTALL_URL }, setting: `${ID_PREFIX}.auth` },
+        `Install it, or choose another sign-in method with "Fabric Supersat: Configure Sign-In".`,
+      { link: { label: 'Install Azure CLI', url: INSTALL_URL }, configureSignIn: true },
     );
   }
   if (e instanceof SyntaxError) {
-    return new AuthError('The Azure CLI returned output that isn\'t JSON. Run "az account get-access-token" in a terminal to check.');
+    return new AuthError('The Azure CLI returned output that isn\'t JSON. Run "az account get-access-token" in a terminal to check.', {}, { unexpected: true });
   }
 
   const firstError = stderr.split(/\r?\n/).find((l) => l.startsWith('ERROR:')) ?? stderr.split(/\r?\n/)[0] ?? '';
@@ -174,16 +182,80 @@ export function toAuthError(
       terminalCommand: loginCommand(suggested, tenant, preferDeviceCode),
     });
   }
-  return new AuthError(`Azure CLI: ${firstError || e.message || String(err)}`);
+  return new AuthError(`Azure CLI: ${firstError || e.message || String(err)}`, {}, { unexpected: true });
 }
 
-/** Runs `file` without a shell, except on Windows where `az` is a .cmd script. */
+export interface FindExecutableOptions {
+  /** The PATH value; defaults to the extension host's. */
+  path?: string;
+  /** Windows' executable extensions (PATHEXT); defaults to the extension host's, or `.COM;.EXE;.BAT;.CMD`. */
+  pathExt?: string;
+  platform?: NodeJS.Platform;
+  /** Whether a file exists and can be run; defaults to checking the file system. */
+  isExecutable?: (file: string) => boolean;
+}
+
+/**
+ * The full path of the program `name`, from the folders on PATH, in order, or `undefined`
+ * if there is none. Only absolute folders count: an empty or relative PATH entry (such as
+ * `.`) would mean the current folder, which may be an untrusted project. On Windows, `name`
+ * plus each PATHEXT extension is tried (e.g. `az.cmd`), as cmd.exe would, but the current
+ * folder is never searched first.
+ */
+export function findExecutable(name: string, options: FindExecutableOptions = {}): string | undefined {
+  const platform = options.platform ?? process.platform;
+  const windows = platform === 'win32';
+  const paths = windows ? path.win32 : path.posix;
+  const isExecutable = options.isExecutable ?? defaultIsExecutable;
+  const extensions = windows
+    ? (options.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+        .split(';')
+        // Lower case, as installed files are named (Windows file names ignore case anyway).
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.startsWith('.'))
+    : [''];
+  const entries = (options.path ?? process.env.PATH ?? process.env.Path ?? '').split(windows ? ';' : ':');
+  for (const entry of entries) {
+    const dir = (windows ? entry.trim().replace(/^"(.*)"$/, '$1') : entry).trim();
+    if (!dir || !paths.isAbsolute(dir)) {
+      continue;
+    }
+    for (const extension of extensions) {
+      const file = paths.join(dir, `${name}${extension}`);
+      if (isExecutable(file)) {
+        return file;
+      }
+    }
+  }
+  return undefined;
+}
+
+function defaultIsExecutable(file: string): boolean {
+  try {
+    if (!statSync(file).isFile()) {
+      return false;
+    }
+    if (process.platform !== 'win32') {
+      accessSync(file, constants.X_OK);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Runs `file` (a full path) without a shell, except on Windows, where `az` is a .cmd
+ * script that needs cmd.exe: there the path is quoted (it usually has spaces, e.g. under
+ * `C:\Program Files`). The arguments are fixed or validated (see `SAFE_TENANT`).
+ */
 const defaultExec: ExecFn = (file, args) =>
   new Promise((resolve, reject) => {
+    const windows = process.platform === 'win32';
     execFile(
-      file,
+      windows ? `"${file}"` : file,
       args,
-      { timeout: 60_000, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 1024 * 1024 },
+      { timeout: 60_000, windowsHide: true, shell: windows, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
           reject(Object.assign(error, { stderr: String(stderr) }));

@@ -35,6 +35,12 @@ suite('yamlFile', () => {
     assert.strictEqual(text(), '# top\n\nz: 1 # zed\na:\n  b: "new"\n  c: plain\n\n# end\n');
   });
 
+  test('keeps a file’s CRLF line endings (e.g. on Windows)', async () => {
+    await write('# top\r\na:\r\n  b: old\r\n');
+    await updateYamlFile(uri, [[['a', 'b'], 'new']], '');
+    assert.strictEqual(text(), '# top\r\na:\r\n  b: "new"\r\n');
+  });
+
   test('quotes strings that would otherwise read as other types', async () => {
     await updateYamlFile(uri, [[['v'], 'no'], [['n'], '0123'], [['d'], '2024-01-01'], [['e'], '']], '');
     const file = await readYamlFile(uri);

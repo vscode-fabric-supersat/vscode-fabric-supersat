@@ -15,6 +15,20 @@ export async function run(): Promise<void> {
   await import('../suite/pastedToken.test.js');
   await import('../suite/workspaceService.test.js');
   await import('../suite/yamlFile.test.js');
+  await import('../suite/notebookFormat.test.js');
+  await import('../suite/fabricNotebookApi.test.js');
+  await import('../suite/notebookFiles.test.js');
+  await import('../suite/notebookFolders.test.js');
+  await import('../suite/notebookReferences.test.js');
+  await import('../suite/workspaceTools.test.js');
+  await import('../suite/workspaceSync.test.js');
+  await import('../suite/errorFix.test.js');
+  await import('../suite/notebookSync.test.js');
+  await import('../suite/localSafety.test.js');
+  await import('../suite/authSettings.test.js');
+  await import('../suite/notebookSettings.test.js');
+  await import('../suite/requestLimiter.test.js');
+  await import('../suite/keyedLock.test.js');
 
   return new Promise((resolve, reject) => {
     mocha.run((failures) => {

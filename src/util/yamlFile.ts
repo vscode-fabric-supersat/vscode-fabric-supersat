@@ -8,13 +8,19 @@
  * - Strings are written double-quoted, so IDs and names are never read back as numbers,
  *   booleans or dates.
  * - A file with YAML errors is never overwritten; the error names the file and line.
+ * - A file keeps its line endings (CRLF or LF).
  */
 import * as vscode from 'vscode';
 import { type Document, isScalar, LineCounter, parseDocument, Scalar } from 'yaml';
+import { lineEndingOf, withLineEnding } from './text';
+import type { WarningError } from './errorFix';
 
 export type YamlPath = readonly (string | number)[];
 
-export class YamlFileError extends Error {
+/** A YAML file with an error, or a value that isn't allowed: a warning about the user's file (see `WarningError`). */
+export class YamlFileError extends Error implements WarningError {
+  readonly warning = true;
+
   constructor(
     readonly uri: vscode.Uri,
     detail: string,
@@ -66,6 +72,18 @@ export async function updateYamlFile(
   newFileText: string,
 ): Promise<void> {
   const text = (await readText(uri)) ?? newFileText;
+  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedYamlText(uri, text, values)));
+}
+
+/**
+ * `text` (a YAML file's content) with values set as `updateYamlFile` sets them, keeping its
+ * comments, layout and line endings. `uri` names the file in errors only.
+ */
+export function updatedYamlText(
+  uri: vscode.Uri,
+  text: string,
+  values: readonly (readonly [YamlPath, string | number | boolean | undefined])[],
+): string {
   const document = parse(uri, text);
   try {
     for (const [path, value] of values) {
@@ -86,7 +104,13 @@ export async function updateYamlFile(
     // e.g. the file's top level is a list, so there is no map to put the key in.
     throw new YamlFileError(uri, `can't update it: ${err instanceof Error ? err.message : String(err)}`);
   }
-  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(document.toString()));
+  // The file keeps its line endings (CRLF or LF).
+  return withLineEnding(document.toString(), lineEndingOf(text));
+}
+
+/** Parses YAML text (a file's content). Throws `YamlFileError`, naming `uri` and the line, if it isn't valid. */
+export function parseYamlText(uri: vscode.Uri, text: string): YamlFile {
+  return new YamlFile(uri, parse(uri, text));
 }
 
 function toNode(value: string | number | boolean): Scalar {

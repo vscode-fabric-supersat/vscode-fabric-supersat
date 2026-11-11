@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { ID_PREFIX } from '../constants';
-import { getConfig } from '../util/config';
+import { getAuthSettings } from './settings';
 import { AuthError, type Resource, type TokenProvider } from './types';
 
 /** VS Code's built-in Microsoft (Entra ID) authentication provider. */
@@ -27,12 +26,12 @@ const SCOPES: Record<Resource, string> = { fabric: FABRIC_SCOPE, arm: ARM_SCOPE 
  * pre-authorized by Microsoft for the Fabric API and always fails with AADSTS65002.
  */
 export function getSessionScopes(resource: Resource = 'fabric'): string[] {
-  const { clientId, tenant } = getConfig().auth;
+  const { clientId, tenant } = getAuthSettings();
   if (!clientId) {
     throw new AuthError(
-      `Signing in with VS Code needs your own Microsoft Entra app registration. Set "${ID_PREFIX}.auth.clientId" ` +
-        '(see "Signing in to Fabric" in the README).',
-      { setting: `${ID_PREFIX}.auth` },
+      `Signing in with VS Code needs your own Microsoft Entra app registration. Set its client ID with ` +
+        '"Fabric Supersat: Configure Sign-In" (see "Signing in to Fabric" in the README).',
+      { configureSignIn: true },
     );
   }
   const scopes = [`VSCODE_CLIENT_ID:${clientId}`];
@@ -47,24 +46,41 @@ export function getSessionScopes(resource: Resource = 'fabric'): string[] {
 export class VscodeSessionProvider implements TokenProvider {
   readonly method = 'vscode';
   readonly label = 'VS Code (Microsoft account)';
-  readonly supportsTenantSwitching = true;
+  readonly canListTenants = true;
 
   async getToken(resource: Resource, reason: string): Promise<string> {
     // Returns an existing session silently; otherwise prompts, showing `reason`.
-    const session = await vscode.authentication.getSession(AUTH_PROVIDER_ID, getSessionScopes(resource), {
-      createIfNone: { detail: reason },
-    });
+    const session = await getSession(getSessionScopes(resource), reason);
     return session.accessToken;
   }
 
   async signIn(): Promise<string> {
-    const session = await vscode.authentication.getSession(AUTH_PROVIDER_ID, getSessionScopes(), {
-      createIfNone: { detail: 'Sign in to Microsoft Fabric.' },
-    });
+    const session = await getSession(getSessionScopes(), 'Sign in to Microsoft Fabric.');
     return session.account.label;
   }
 
   async signOut(): Promise<string> {
     return 'To sign out, use the Accounts menu at the bottom of the Activity Bar.';
   }
+}
+
+/**
+ * VS Code's session, prompting if there is none. Declining the prompt ("User did not consent
+ * to login.") or cancelling the sign-in is the user's choice, so it becomes a warning
+ * (`AuthError`) rather than an unexpected error.
+ */
+async function getSession(scopes: string[], reason: string): Promise<vscode.AuthenticationSession> {
+  try {
+    return await vscode.authentication.getSession(AUTH_PROVIDER_ID, scopes, { createIfNone: { detail: reason } });
+  } catch (err) {
+    if (isDeclined(err)) {
+      throw new AuthError((err as Error).message, { configureSignIn: true });
+    }
+    throw err;
+  }
+}
+
+/** Whether VS Code's sign-in failed because the user declined or cancelled it. */
+export function isDeclined(err: unknown): boolean {
+  return err instanceof Error && /did not consent|cancel/i.test(err.message);
 }
