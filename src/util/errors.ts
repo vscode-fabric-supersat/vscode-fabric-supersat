@@ -1,21 +1,20 @@
 import * as vscode from 'vscode';
 import { AuthCancelledError, AuthError } from '../auth/types';
-import { Commands, ID_PREFIX } from '../constants';
+import { Commands } from '../constants';
 import { FabricApiError } from '../fabric/client';
+import { WorkspaceNameError } from '../workspace/service';
 import { getLogger } from './logger';
 
-const CLIENT_ID = `${ID_PREFIX}.auth.clientId`;
-const TENANT = `${ID_PREFIX}.auth.tenant`;
-const AUTH_SETTINGS = `${ID_PREFIX}.auth`;
+const CONFIGURE = '"Fabric Supersat: Configure Sign-In"';
 
 /** Fixes for Microsoft Entra (AADSTS…) errors from VS Code sign-in with an app registration. */
-const ENTRA_HINTS: Record<string, { hint: string; setting?: string }> = {
+const ENTRA_HINTS: Record<string, { hint: string; configureSignIn?: boolean }> = {
   // First-party app (e.g. VS Code's own) not pre-authorized for the Fabric API.
-  AADSTS65002: { hint: `Use your own app registration: set "${CLIENT_ID}".`, setting: AUTH_SETTINGS },
+  AADSTS65002: { hint: `Use your own app registration: set its client ID with ${CONFIGURE}.`, configureSignIn: true },
   // Single-tenant app used with the multi-tenant `organizations` endpoint.
-  AADSTS50194: { hint: `Your app registration is single-tenant: set "${TENANT}".`, setting: AUTH_SETTINGS },
+  AADSTS50194: { hint: `Your app registration is single-tenant: set its tenant with ${CONFIGURE}.`, configureSignIn: true },
   // Client ID not found in the tenant.
-  AADSTS700016: { hint: `Check "${CLIENT_ID}" and "${TENANT}".`, setting: AUTH_SETTINGS },
+  AADSTS700016: { hint: `Check the client ID and tenant with ${CONFIGURE}.`, configureSignIn: true },
   // Redirect URI not registered on the app.
   AADSTS50011: {
     hint: 'Add the redirect URIs http://localhost and https://vscode.dev/redirect to your app registration.',
@@ -29,7 +28,11 @@ const ENTRA_HINTS: Record<string, { hint: string; setting?: string }> = {
 
 interface Fix {
   hint?: string;
+  /** A VS Code setting to open. Never a sign-in setting: those use `configureSignIn`. */
   setting?: string;
+  configureSignIn?: boolean;
+  /** Offer the "Select Workspace" command. */
+  selectWorkspace?: boolean;
   terminalCommand?: string;
   link?: { label: string; url: string };
 }
@@ -39,11 +42,14 @@ function fixFor(err: unknown, message: string): Fix {
     return err.fix;
   }
   if (err instanceof FabricApiError && err.status === 401) {
-    return { hint: 'Your sign-in may have expired: run "Fabric Supersat: Sign In to Fabric".', setting: AUTH_SETTINGS };
+    return { hint: 'Your sign-in may have expired: run "Fabric Supersat: Sign In to Fabric".', configureSignIn: true };
+  }
+  if (err instanceof WorkspaceNameError) {
+    return { selectWorkspace: true };
   }
   if (err instanceof FabricApiError && (err.status === 403 || err.status === 404)) {
     // Usually a saved workspace that was deleted, or that belongs to another tenant.
-    return { hint: 'Check the workspace: run "Fabric Supersat: Select Workspace".', setting: `${ID_PREFIX}.workspace` };
+    return { hint: 'Check the workspace: run "Fabric Supersat: Select Workspace".', selectWorkspace: true };
   }
   const code = /AADSTS\d+/.exec(message)?.[0];
   return (code && ENTRA_HINTS[code]) || {};
@@ -61,9 +67,11 @@ export async function reportError(action: string, err: unknown): Promise<void> {
   const fix = fixFor(err, message);
   const runCommand = fix.terminalCommand ? `Run "${fix.terminalCommand}"` : undefined;
   const openLink = fix.link?.label;
+  const configure = fix.configureSignIn ? 'Configure Sign-In' : undefined;
+  const selectWorkspace = fix.selectWorkspace ? 'Select Workspace' : undefined;
   const openSettings = fix.setting ? 'Open Settings' : undefined;
   const showLog = 'Show Log';
-  const buttons = [runCommand, openLink, openSettings, showLog].filter((b): b is string => !!b);
+  const buttons = [runCommand, openLink, configure, selectWorkspace, openSettings, showLog].filter((b): b is string => !!b);
 
   const text = `${action} failed: ${message}${fix.hint ? ` ${fix.hint}` : ''}`;
   const choice = await vscode.window.showErrorMessage(text, ...buttons);
@@ -76,6 +84,10 @@ export async function reportError(action: string, err: unknown): Promise<void> {
     terminal.sendText(fix.terminalCommand);
   } else if (choice === openLink && fix.link) {
     await vscode.env.openExternal(vscode.Uri.parse(fix.link.url));
+  } else if (choice === selectWorkspace) {
+    await vscode.commands.executeCommand(Commands.selectWorkspace);
+  } else if (choice === configure) {
+    await vscode.commands.executeCommand(Commands.configureSignIn);
   } else if (choice === openSettings && fix.setting) {
     await vscode.commands.executeCommand('workbench.action.openSettings', fix.setting);
   } else if (choice === showLog) {

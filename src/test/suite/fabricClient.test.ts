@@ -23,6 +23,22 @@ function fakeFetch(responses: Response[]) {
   return { fetchFn, calls };
 }
 
+suite('FabricClient: redirects', () => {
+  test('every request refuses HTTP redirects, so the token can’t be redirected elsewhere', async () => {
+    const redirects: (RequestRedirect | undefined)[] = [];
+    const c = new FabricClient({
+      getToken: async () => 'tok',
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        redirects.push(init?.redirect);
+        return new Response(JSON.stringify({ value: [{ id: 'w1', displayName: 'Sales', type: 'Workspace' }] }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.deepStrictEqual(await c.listWorkspaces(), [{ id: 'w1', displayName: 'Sales', type: 'Workspace' }]);
+    await c.updateNotebookDefinition('w1', 'n1', { parts: [] });
+    assert.deepStrictEqual(redirects, ['error', 'error']);
+  });
+});
+
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
     status,

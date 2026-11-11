@@ -12,24 +12,35 @@ This Visual Studio Code extension runs in **VS Code Desktop** and **VS Code for 
 
 | Command | Description |
 | --- | --- |
-| `Fabric Supersat: Show Log` | Opens the extension's log in the Output panel. |
+| `Fabric Supersat: Configure Sign-In` | Shows and changes the sign-in method, app registration client ID and tenant. **Tenant** lists your Microsoft Entra tenants to pick from (Azure CLI and VS Code methods), or lets you type a tenant ID or domain, or clear it to use your default tenant. See [Signing in to Fabric](#signing-in-to-fabric). |
+| `Fabric Supersat: Create New Fabric Notebook` | Asks for the notebook type (PySpark or Python) and a name, and creates `src/Notebooks/<Name>/<Name>.py` (and its `.ipynb`) with one empty Python cell, then opens it. Upload it with **Save and Upload Notebook**. |
+| `Fabric Supersat: Download All Notebooks` | Downloads every notebook in the current workspace. If some already have local copies, asks once whether to replace or skip them. Notebooks that can't be downloaded (e.g. Spark SQL) are skipped; the summary links to the reasons in the log. Cancellable. |
+| `Fabric Supersat: Download Notebook` | Browse the notebooks in the current workspace and download the one you pick (see [Notebooks](#notebooks)). Asks for a workspace if none is selected, and signs you in first if needed. |
 | `Fabric Supersat: Open Settings` | Opens the Settings editor filtered to this extension's settings. |
+| `Fabric Supersat: Save and Upload Notebook` | Saves the open notebook and uploads it to the current workspace, replacing the notebook with the same name or creating it. Also a button in the notebook toolbar. |
+| `Fabric Supersat: Select Workspace` | Lists your Fabric workspaces and saves the one you pick as the current workspace (see [Current Workspace](#current-workspace)). Also available by clicking the workspace in the status bar, which shows from startup. |
+| `Fabric Supersat: Show Log` | Opens the extension's log in the Output panel. |
 | `Fabric Supersat: Sign In to Fabric` | Signs in with the configured method (see below) and shows the account. |
 | `Fabric Supersat: Sign Out of Fabric` | Forgets a pasted token, or tells you how to sign out for the other methods. |
-| `Fabric Supersat: Switch Tenant` | Lists your Microsoft Entra tenants and signs in to the one you pick (saved in `fabric-supersat.auth.tenant`). Clears the saved workspace if the tenant changes. Azure CLI and VS Code methods only. |
-| `Fabric Supersat: Select Workspace` | Lists your Fabric workspaces and saves the one you pick as the current workspace (see [Current Workspace](#current-workspace)). Also available by clicking the workspace in the status bar. |
-| `Fabric Supersat: List Notebooks` | Browse the notebooks in the current workspace. Selecting a notebook copies its ID. Asks for a workspace if none is selected, and signs you in first if needed. |
+| `Fabric Supersat: Upload All Notebooks` | Saves any open notebooks, then uploads every notebook in `src/Notebooks` to the current workspace. Asks once, listing which notebooks it will overwrite and create, and which it skips (e.g. not a Fabric notebook). Cancellable. |
 
 ## Current Workspace
 
 Commands that work in a Fabric workspace use the current workspace. Pick it with **Fabric Supersat: Select Workspace** or the status bar item. If none is selected, the first command that needs one asks you to pick it and remembers your choice.
 
-Where it's saved:
+Only the workspace's **name** is saved, never its ID. Where it's saved:
 
 | Situation | Saved in |
 | --- | --- |
 | A folder is open | `.fabric-supersat/settings.yaml` in that folder (the first folder of a multi-root workspace). |
-| No folder open, or the folder is read-only (some virtual workspaces) | User settings `fabric-supersat.workspace.id` and `fabric-supersat.workspace.name`. |
+| No folder open, the folder is read-only (some virtual workspaces), or the folder isn't trusted ([Restricted Mode](#restricted-mode)) | User setting `fabric-supersat.workspace.name`. |
+
+The first time a command needs the workspace in a session, the extension lists your workspaces in Fabric and finds the one with that name (ignoring case, as Fabric does). The ID is cached until VS Code restarts, or until you sign in again, sign out, or change the sign-in method, client ID or tenant. So the name you see is always the workspace you work in. The command stops, with a **Select Workspace** button, if:
+
+- no workspace you can access has that name (it was renamed or deleted, or is in another tenant), or
+- **more than one** workspace has that name. The extension never guesses which one you meant.
+
+When several workspaces share a name, **Select Workspace** lists each of them with a warning and its ID; click the ID you want. That ID is used until VS Code restarts (or you sign in again, sign out or change sign-in settings). Since only the name is saved, the next session asks you to pick again. Renaming the workspaces in Fabric so their names are unique avoids this.
 
 The `.fabric-supersat` folder is local to you and is never committed: the extension puts a `.gitignore` containing `*` inside it, so git ignores the whole folder without any change to your project's own `.gitignore`. Each person working on the project picks their own workspace (for example their own dev workspace).
 
@@ -45,27 +56,102 @@ Only one of the two is used at a time: while a folder is open, the user settings
 # Fabric workspace that commands work in.
 # Change it with "Fabric Supersat: Select Workspace".
 workspace:
-  id: "00000000-0000-0000-0000-000000000000"
   name: "Sales (dev)"
 ```
 
+An `id` left in the file by an earlier version is ignored, and removed the next time the extension saves the file.
+
 With Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml) installed, editing the file gives autocomplete, descriptions on hover and warnings for typos. Without it the file is still plain YAML. If the file has a YAML error, it is ignored (no workspace is selected) and the extension won't overwrite it; the error message names the line.
 
-**Switch Tenant** clears the saved workspace (blanking it in the file, and in the user settings) when the tenant changes, since workspaces belong to a tenant; the next command that needs one asks you to pick it.
+Changing the tenant in **Configure Sign-In** clears the saved workspace (blanking it in the file, and in the user settings) when the tenant changes, since workspaces belong to a tenant; the next command that needs one asks you to pick it.
+
+## Notebooks
+
+Notebooks are kept as files in your project and identified by **name**, no Fabric item ID (GUID) is stored. Importantly, this means that notebooks are not tied to a GUID that Fabric owns and changes, notebooks are easily uploaded and deployed to other workspaces (e.g. Test and Prod), and that **save/upload will overwrite** any notebook of the same name in the currently selected workspace. For convenience, the folder name is also the notebook's name.
+
+Downloading a notebook (**Download Notebook**, then pick one, or **Download All Notebooks**) writes two files:
+
+| File | Format | Purpose |
+| --- | --- | --- |
+| `src/Notebooks/<Name>/<Name>.py` | Fabric's Git format: plain Python with `# CELL` markers, the same content Fabric's own Git integration writes (as `notebook-content.py`). | The source to commit. This is what gets uploaded. |
+| `.fabric-supersat/Notebooks/<Name>/<Name>.ipynb` | Jupyter, including cell outputs. | Your local working copy. Ignored by git. |
+
+Both come straight from Fabric. If you already have a local copy, you're asked before it is replaced. The `.ipynb` then opens.
+
+> **Recommended:** Microsoft's [Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) (`ms-toolsai.jupyter`). VS Code can open and edit notebooks without it, but you need it to run cells locally against a Python kernel.
+
+- **Either file opens in the notebook editor.** For the `.py`, the extension sets a default for the `workbench.editorAssociations` setting, so a `.py` file directly in a `src/Notebooks/<Name>/` folder opens as a notebook while other Python files open as usual. Notebooks from Fabric's own Git integration (`<Name>.Notebook/notebook-content.py`) open as notebooks too. Use **Reopen Editor With… → Text Editor** to see the raw file.
+- **Saving either file updates the other.** Saving the `.ipynb` regenerates the `.py`. Saving the `.py` updates the `.ipynb` and keeps the outputs of cells you didn't change. If the other file is open with unsaved changes, it isn't touched and you get a warning.
+- **The `.py` is the source of truth.** When a `.py` changes outside the editor (for example `git restore`, a branch switch or `git pull`), its `.ipynb` is regenerated from it, keeping the outputs of unchanged cells. At startup, any `.ipynb` older than its `.py` is regenerated, and a `.py` without one (for example in a fresh clone) gets its `.ipynb`. An `.ipynb` open with unsaved changes is left alone, with a warning.
+- **Save and Upload** (the cloud button in the notebook toolbar) saves, then uploads the `.py` to the current workspace. A notebook with the same name (ignoring case) is overwritten, otherwise a new one is created. You're asked to confirm either way.
+
+**Which files count as notebooks.** A file is treated as a notebook only if both its path and its content say so:
+
+- **Path:** `src/Notebooks/<Name>/<Name>.py` or `.fabric-supersat/Notebooks/<Name>/<Name>.ipynb`, with the file named after its folder.
+- **Content:** a `.py` must start with the line `# Fabric notebook source`. A `.ipynb` must be a Jupyter notebook carrying Fabric's `microsoft` metadata, which Fabric writes on the notebook and its cells.
+
+A file that fails the content check is never synced, overwritten or uploaded; you get a warning instead. Only the notebook itself (and its optional `notebook.yaml`, below) belongs directly in its folder. Files in a subfolder (for example notes) open as ordinary files and are never uploaded. For code shared between notebooks, see [Sharing code between notebooks](#sharing-code-between-notebooks).
+
+**Description (`notebook.yaml`).** A notebook's description in Fabric can be kept in source control in an optional `src/Notebooks/<Name>/notebook.yaml`, next to the `.py`:
+
+```yaml
+# Fabric notebook properties. The notebook's name is its folder name.
+description: "Loads daily sales into the bronze lakehouse"
+```
+
+- **Upload** sets the description in Fabric to the one in the file. It is sent only when it differs from Fabric's (on create, or as a separate property update), and no IDs are stored anywhere.
+- **No file, or no `description` in it:** upload leaves the description in Fabric as it is, exactly as before this file existed. `description: ""` clears it.
+- **Download** writes the file only when the notebook has a description in Fabric. If the file already exists, it is updated (your comments are kept); a notebook without a description gets `description: ""`.
+- Fabric allows at most 256 characters. A longer description, or a file with a YAML error, stops the upload with a message naming the file, before anything is sent. **Upload All** skips that notebook and says why.
+- With Red Hat's YAML extension installed, the file gets autocomplete and a warning past 256 characters.
+
+This is the extension's own file, not Fabric Git integration's `.platform`. That format needs a `logicalId`, which this extension doesn't use.
+
+**Creating a notebook.** Run **Create New Fabric Notebook**, choose the type and enter a name. The types are the ones the extension supports: **PySpark** (Python on Spark, Fabric's default) and **Python** (Python without Spark, lighter and quicker to start). It creates both files with one empty Python cell, set up as Fabric sets up that type, and opens the notebook. The name is checked as you type: it must work as a folder name and not already exist in the project. Nothing is created in Fabric until you upload. Creating an empty `src/Notebooks/<Name>/<Name>.py` by hand also works: it opens as an empty notebook, and saving it writes a valid Fabric file. Everything the extension writes passes the content check.
+
+### Supported notebooks
+
+PySpark and Python notebooks.
+
+Fabric stores Spark SQL, Scala and SparkR notebooks in other files (`notebook-content.sql`, `.scala`, `.r`), and downloading one explains that it isn't supported yet.
+
+**Built-in resources aren't supported.** Files in a notebook's Built-in resources folder in Fabric (for example `helper.py`) aren't downloaded or uploaded, and the extension has no local equivalent, because Fabric's public API doesn't include them ([Microsoft: Notebooks Resources Folder Support in Git](https://learn.microsoft.com/fabric/data-engineering/notebook-source-control-deployment#notebooks-resources-folder-support-in-git)). Microsoft's own deployment tool, fabric-cicd, has the same limitation: Fabric silently ignores resource files sent to its API, so a deployed notebook can fail on its first `import` of a resource ([fabric-cicd issue #1095](https://github.com/microsoft/fabric-cicd/issues/1095), labelled a known product issue). Uploading sends only the notebook's cells and metadata; Microsoft doesn't document whether that leaves a notebook's existing Built-in resources untouched. Instead of Built-in resources, share code as described below.
+
+### Sharing code between notebooks
+
+Keep shared code in Fabric items that the extension (or Fabric's own tools) can deploy, not in Built-in resources:
+
+| Notebook language | Share code with | How |
+| --- | --- | --- |
+| **Python** | Another notebook, loaded with `%run` | Put the shared functions in their own Python notebook (for example `Common`, created with **Create New Fabric Notebook** → **Python**) and upload it to the same workspace. In each notebook that uses it, run `%run Common` (in its own cell, near the top); its functions and variables are then available. `%run` loads notebooks in the same workspace only, and can't load `.py` files ([Microsoft: Python experience on notebook](https://learn.microsoft.com/fabric/data-engineering/using-python-experience-on-notebook)). |
+| **PySpark** | An Environment | Package the shared code as a Python library (`.whl`, or a single `.py`) and add it to a Fabric Environment's custom libraries, then attach the Environment to the notebook ([Microsoft: Library management in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library)). The notebook can then `import` it. The attachment is stored in the notebook's metadata (`dependencies.environment`), which download and upload keep. The extension doesn't manage Environments (yet); use the Fabric portal. |
+
+Notebook names must also work as folder names: names containing `\ / : * ? " < > |`, or starting or ending with a space, or ending with a dot, are refused rather than changed (a changed name wouldn't match on upload). Rename the notebook in Fabric first.
+
+## Restricted Mode
+
+A folder you haven't trusted (VS Code's [Restricted Mode](https://code.visualstudio.com/docs/editor/workspace-trust)) could have been prepared by someone else, so until you trust it the extension:
+
+- doesn't update notebook files automatically (at startup, or when a `.py` changes on disk). Saving a notebook yourself still updates its other file;
+- doesn't read or write the folder's `.fabric-supersat/settings.yaml`, and uses the workspace in your user settings instead.
+
+Both start working as soon as you trust the folder. In any mode, the extension never writes through a symbolic link inside the project (for example a `.fabric-supersat` folder that links elsewhere): the write fails with an error naming the link.
 
 ## Signing in to Fabric
 
-The default authentication method, `auto`, picks the first method one that applies:
+The default authentication method, `auto`, picks the first method that applies:
 
-| Method | Setting value | Where | Setup |
-| --- | --- | --- | --- |
-| [Azure CLI](#azure-cli-default-on-desktop) | `azureCli` | Desktop | Install the Azure CLI and run `az login`. |
-| [Pasted Token](#pasted-token-fallback-on-the-web) | `token` | Desktop and web | None. Paste a token when asked; it lasts about an hour. |
-| [VS Code Sign In](#vs-code-sign-in-with-your-own-app-registration) | `vscode` | Desktop and web | Your own Microsoft Entra app registration. |
+| Method | Where | Setup |
+| --- | --- | --- |
+| [Azure CLI](#azure-cli-default-on-desktop) | Desktop | Install the Azure CLI and run `az login`. |
+| [Pasted Token](#pasted-token-fallback-on-the-web) | Desktop and web | None. Paste a token when asked; it lasts about an hour. |
+| [VS Code Sign In](#vs-code-sign-in-with-your-own-app-registration) | Desktop and web | Your own Microsoft Entra app registration. |
 
-The chosen method can be set and saved in the extension setting `fabric-supersat.auth.method`. 
+Choose a different method with **Fabric Supersat: Configure Sign-In**, which also sets the app registration client ID and tenant. **Tenant** lists your tenants to pick from and signs in to the one you pick; if they can't be listed (for example before your first `az login`, or with a pasted token) you can type a tenant ID or domain instead. **Clear tenant** goes back to your default tenant.
 
-With `auto`, desktop uses the **Azure CLI**. The web uses **VS Code sign-in** if `fabric-supersat.auth.clientId` is set, otherwise a **pasted token**. Every method asks you to sign in only when a command needs it. If something is missing, the error message has a button that fixes it (run `az login`, open settings, and so on).
+These sign-in settings are deliberately **not** VS Code settings: they are never read from any `settings.json` (user, workspace or folder) or `settings.yaml`, so a project you open can't redirect your sign-in to another tenant or app registration. They are kept in the extension's own storage on the current machine, and the command checks them (the client ID must be a GUID; the tenant a tenant ID or domain).
+
+With `auto`, desktop uses the **Azure CLI**. The web uses **VS Code sign-in** if a client ID is set, otherwise a **pasted token**. Every method asks you to sign in only when a command needs it. If something is missing, the error message has a button that fixes it (run `az login`, configure sign-in, and so on).
 
 > **Can you help?**  
 >
@@ -88,7 +174,7 @@ Uses the account you signed in with `az login`. No app registration is needed: M
 >
 > `az account show` can also be used to check if az login was successful.
 >
-> The extension runs `az account get-access-token --resource https://api.fabric.microsoft.com` (plus `--tenant` when `fabric-supersat.auth.tenant` is set) and reuses the token until shortly before it expires.
+> The extension runs `az account get-access-token --resource https://api.fabric.microsoft.com` (plus `--tenant` when a tenant is set) and reuses the token until shortly before it expires.
 >
 > To sign out, run `az logout`.
 
@@ -116,8 +202,8 @@ In the [Microsoft Entra admin center](https://entra.microsoft.com), go to **Iden
 
 - **Name:** for example `Fabric Supersat (VS Code)`.
 - **Supported account types:**
-  - *Accounts in this organizational directory only* (single tenant): simplest. Set `fabric-supersat.auth.tenant` to this tenant.
-  - *Accounts in any organizational directory* (multi-tenant): needed only if you use **Switch Tenant** to work in tenants other than the app's own.
+  - *Accounts in this organizational directory only* (single tenant): simplest. Set the tenant to this tenant (step 4).
+  - *Accounts in any organizational directory* (multi-tenant): needed only if you pick other tenants in **Configure Sign-In** to work in tenants other than the app's own.
 - Leave **Redirect URI** empty for now, then select **Register**.
 
 Copy the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
@@ -139,19 +225,21 @@ Under **API permissions → Add a permission**, add these delegated permissions:
 | API | Permission | Needed for |
 | --- | --- | --- |
 | **Power BI Service** | `Workspace.Read.All` | Listing workspaces and notebooks. Required. |
-| **Azure Service Management** | `user_impersonation` | **Switch Tenant** (listing your tenants). Optional. |
+| **Azure Service Management** | `user_impersonation` | Listing your tenants in **Configure Sign-In → Tenant**. Optional. |
 
 Because the extension requests `.default`, every permission it uses must be listed here. Users consent to all of them at their first sign-in. If your organization doesn't allow user consent, an admin must select **Grant admin consent**.
 
 #### 4. Configure the extension
 
-| Setting | Value |
-| --- | --- |
-| `fabric-supersat.auth.method` | `vscode` (or leave `auto` on the web). |
-| `fabric-supersat.auth.clientId` | The Application (client) ID. Required. |
-| `fabric-supersat.auth.tenant` | The Directory (tenant) ID or a domain such as `contoso.onmicrosoft.com`. Required for single-tenant registrations. |
+Run **Fabric Supersat: Configure Sign-In** and set:
 
-Then run **Fabric Supersat: Sign In to Fabric**. If sign-in fails, the error message names the setting or registration step to fix. Details are in **Fabric Supersat: Show Log**.
+| Item | Value |
+| --- | --- |
+| Sign-in method | **VS Code (app registration)** (or leave **Auto** on the web). |
+| App registration client ID | The Application (client) ID. Required. |
+| Tenant | The Directory (tenant) ID or a domain such as `contoso.onmicrosoft.com`. Required for single-tenant registrations. |
+
+Then run **Fabric Supersat: Sign In to Fabric**. If sign-in fails, the error message names the item or registration step to fix. Details are in **Fabric Supersat: Show Log**.
 
 ## CI Build
 
@@ -171,8 +259,8 @@ Run: 2026-11-11, on Linux (headless, with `xvfb-run`).
 
 | Suite | Command | Runs | Result |
 | --- | --- | --- | --- |
-| Desktop | `xvfb-run -a npm test` | Shared and desktop-only tests in VS Code 1.145.3 | 65 passing, 0 failing |
-| Web | `npm run test:web` | Shared tests in headless Chromium | 53 passing, 0 failing |
+| Desktop | `xvfb-run -a npm test` | Shared and desktop-only tests in VS Code 1.145.3 | 124 passing, 0 failing |
+| Web | `npm run test:web` | Shared tests in headless Chromium | 112 passing, 0 failing |
 
 The web run has fewer tests because the desktop-only ones (Azure CLI sign-in) can't run in a browser.
 

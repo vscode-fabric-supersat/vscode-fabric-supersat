@@ -86,13 +86,13 @@ suite('AzureCliTokenProvider', () => {
     const stderr = [
       'ERROR: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.',
       'Run the command below to authenticate interactively; additional arguments may be added as needed:',
-      'az login --tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" --scope "https://api.fabric.microsoft.com/.default"',
+      'az login --tenant "00000000-0000-0000-0000-000000000001" --scope "https://api.fabric.microsoft.com/.default"',
     ].join('\n');
     const { exec } = fakeAz([azError(stderr)]);
     await assert.rejects(new AzureCliTokenProvider({ getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
       assert.strictEqual(
         err.fix.terminalCommand,
-        'az login --tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" --scope "https://api.fabric.microsoft.com/.default" --allow-no-subscriptions',
+        'az login --tenant "00000000-0000-0000-0000-000000000001" --scope "https://api.fabric.microsoft.com/.default" --allow-no-subscriptions',
       );
       return true;
     });

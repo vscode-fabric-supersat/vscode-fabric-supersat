@@ -7,18 +7,12 @@
   "additionalProperties": false,
   "properties": {
     "workspace": {
-      "description": "Fabric workspace that commands work in. Change it with \"Fabric Supersat: Select Workspace\".",
+      "description": "Fabric workspace that commands work in, by name. Change it with \"Fabric Supersat: Select Workspace\".",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "description": "Workspace ID (a GUID), as shown in the workspace URL: app.fabric.microsoft.com/groups/<id>. Empty when none is selected.",
-          "type": "string",
-          "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-          "patternErrorMessage": "Expected a workspace ID like 00000000-0000-0000-0000-000000000000, or \"\"."
-        },
         "name": {
-          "description": "Workspace display name, shown in the status bar. Informational: the ID decides which workspace is used.",
+          "description": "Name of the Fabric workspace that commands work in, as shown in Fabric. Its ID is looked up in Fabric by this name (a name shared by more than one workspace is refused). Empty when none is selected.",
           "type": "string"
         }
       }

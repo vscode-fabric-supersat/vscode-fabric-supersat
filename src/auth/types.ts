@@ -1,11 +1,11 @@
-/** How the extension gets Microsoft Entra tokens. See the `auth.method` setting. */
+/** How the extension gets Microsoft Entra tokens. Chosen with "Configure Sign-In" (see `settings.ts`). */
 export type AuthMethod = 'azureCli' | 'vscode' | 'token';
 
 /** The APIs the extension needs tokens for. */
 export type Resource =
   /** Fabric REST API (api.fabric.microsoft.com). */
   | 'fabric'
-  /** Azure Resource Manager, only used to list tenants for "Switch Tenant". */
+  /** Azure Resource Manager, only used to list tenants in "Configure Sign-In". */
   | 'arm';
 
 /** One way of signing in. Implementations live in `src/auth` (shared) and `src/node` (desktop only). */
@@ -13,8 +13,8 @@ export interface TokenProvider {
   readonly method: AuthMethod;
   /** Shown to users, e.g. "Azure CLI". */
   readonly label: string;
-  /** Whether "Switch Tenant" can work with this method (it needs an ARM token). */
-  readonly supportsTenantSwitching: boolean;
+  /** Whether "Configure Sign-In" can list tenants with this method (it needs an ARM token). */
+  readonly canListTenants: boolean;
 
   /** Returns a bearer token, prompting the user if needed. `reason` explains why in the prompt. */
   getToken(resource: Resource, reason: string): Promise<string>;
@@ -26,13 +26,14 @@ export interface TokenProvider {
 
 /**
  * A sign-in problem the user can fix. `reportError` turns the optional fields into
- * buttons: open a setting, run a command in a terminal, or open a web page.
+ * buttons: configure sign-in, run a command in a terminal, or open a web page.
  */
 export class AuthError extends Error {
   constructor(
     message: string,
     readonly fix: {
-      setting?: string;
+      /** Offer the "Configure Sign-In" command. */
+      configureSignIn?: boolean;
       terminalCommand?: string;
       link?: { label: string; url: string };
     } = {},

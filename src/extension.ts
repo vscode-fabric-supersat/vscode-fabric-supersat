@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { PastedTokenProvider } from './auth/pastedToken';
 import { FabricAuth } from './auth/service';
+import { initAuthSettings } from './auth/settings';
 import type { TokenProvider } from './auth/types';
 import { VscodeSessionProvider } from './auth/vscodeSession';
 import { FabricClient } from './fabric/client';
 import type { Services } from './features/feature';
 import { features } from './features';
 import { disposeLogger, getLogger } from './util/logger';
-import { WorkspaceService, createWorkspacePicker } from './workspace/service';
+import { withProgress } from './util/progress';
+import { showWorkspacePicker, WorkspaceService } from './workspace/service';
 
 /** What differs between the desktop (Node.js) and web (browser) builds. */
 export interface Platform {
@@ -27,6 +29,8 @@ export function createExtension(platform: Platform) {
       const logger = getLogger();
       logger.info(`Activating ${platform.name} build (${vscode.env.appName}, ${vscode.UIKind[vscode.env.uiKind]})`);
 
+      // Sign-in settings come from the extension's own state, never from settings files.
+      initAuthSettings(context.globalState);
       const auth = new FabricAuth([
         ...platform.platformTokenProviders(context),
         new VscodeSessionProvider(),
@@ -42,7 +46,10 @@ export function createExtension(platform: Platform) {
       const fabric = new FabricClient({
         getToken: () => auth.getToken('fabric', 'Fabric Supersat needs to sign in to read your Fabric workspaces.'),
       });
-      const workspace = new WorkspaceService({ pick: createWorkspacePicker(fabric) });
+      const workspace = new WorkspaceService({
+        list: async () => withProgress('Loading workspaces…', () => fabric.listWorkspaces()),
+        pick: showWorkspacePicker,
+      });
       context.subscriptions.push(workspace);
       const services: Services = { auth, fabric, workspace };
 

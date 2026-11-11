@@ -9,7 +9,11 @@ export const Commands = {
   openSettings: `${ID_PREFIX}.openSettings`,
   signIn: `${ID_PREFIX}.signIn`,
   signOut: `${ID_PREFIX}.signOut`,
-  switchTenant: `${ID_PREFIX}.switchTenant`,
+  configureSignIn: `${ID_PREFIX}.configureSignIn`,
   selectWorkspace: `${ID_PREFIX}.selectWorkspace`,
-  listNotebooks: `${ID_PREFIX}.listNotebooks`,
+  downloadNotebook: `${ID_PREFIX}.downloadNotebook`,
+  downloadAllNotebooks: `${ID_PREFIX}.downloadAllNotebooks`,
+  uploadAllNotebooks: `${ID_PREFIX}.uploadAllNotebooks`,
+  uploadNotebook: `${ID_PREFIX}.uploadNotebook`,
+  newNotebook: `${ID_PREFIX}.newNotebook`,
 } as const;

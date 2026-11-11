@@ -5,13 +5,14 @@ import type { WorkspaceService } from '../workspace/service';
 
 /** Shared services created once at activation and handed to every feature. */
 export interface Services {
-  /** Fabric tokens, using the sign-in method chosen in the `auth.method` setting. */
+  /** Fabric tokens, using the sign-in method chosen with "Configure Sign-In". */
   readonly auth: FabricAuth;
   /** Fabric REST API client, signed in through `auth`. */
   readonly fabric: FabricClient;
   /**
-   * The current Fabric workspace (`workspace.id` setting). Features that work in a
-   * workspace call `workspace.resolve()`, which asks the user to pick one only if none is saved.
+   * The current Fabric workspace (saved by name only). Features that work in a workspace
+   * call `workspace.resolve()` for its ID, which is looked up in Fabric by name (once per
+   * session), and asks the user to pick a workspace only if none is saved.
    */
   readonly workspace: WorkspaceService;
 }

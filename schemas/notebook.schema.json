@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat/schemas/notebook.schema.json",
+  "title": "Fabric Supersat notebook properties",
+  "description": "src/Notebooks/<Name>/notebook.yaml: properties of the Fabric notebook in this folder. The notebook's name is its folder name.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "description": "The notebook's description in Fabric. Upload sets it; \"\" clears it. Without it, upload leaves the description in Fabric as it is.",
+      "type": "string",
+      "maxLength": 256
+    }
+  }
+}

@@ -25,7 +25,7 @@ suite('resolveAuthMethod', () => {
     assert.throws(() => resolveAuthMethod('azureCli', web, false), (err: AuthError) => {
       assert.ok(err instanceof AuthError);
       assert.match(err.message, /only works in VS Code Desktop/);
-      assert.ok(err.fix.setting);
+      assert.strictEqual(err.fix.configureSignIn, true);
       return true;
     });
   });

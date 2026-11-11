@@ -17,13 +17,16 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/node/extension.js",
   "browser": "./dist/web/extension.js",
   "capabilities": {
     "virtualWorkspaces": true,
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": "limited",
+      "description": "In Restricted Mode, notebook files aren't updated automatically, and the folder's .fabric-supersat/settings.yaml isn't used (the Fabric workspace comes from your user settings until you trust the folder)."
     }
   },
   "contributes": {
@@ -49,8 +52,8 @@
         "category": "Fabric Supersat"
       },
       {
-        "command": "fabric-supersat.switchTenant",
-        "title": "Switch Tenant",
+        "command": "fabric-supersat.configureSignIn",
+        "title": "Configure Sign-In",
         "category": "Fabric Supersat"
       },
       {
@@ -59,65 +62,85 @@
         "category": "Fabric Supersat"
       },
       {
-        "command": "fabric-supersat.listNotebooks",
-        "title": "List Notebooks",
+        "command": "fabric-supersat.downloadNotebook",
+        "title": "Download Notebook",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.downloadAllNotebooks",
+        "title": "Download All Notebooks",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.newNotebook",
+        "title": "Create New Fabric Notebook",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.uploadNotebook",
+        "title": "Save and Upload Notebook",
+        "category": "Fabric Supersat",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "fabric-supersat.uploadAllNotebooks",
+        "title": "Upload All Notebooks",
         "category": "Fabric Supersat"
       }
     ],
+    "notebooks": [
+      {
+        "type": "fabric-supersat-notebook",
+        "displayName": "Fabric Notebook (Git format)",
+        "selector": [
+          {
+            "filenamePattern": "*.py"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "fabric-supersat.uploadNotebook",
+          "group": "navigation@99",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/]Notebooks[\\\\/]([^\\\\/]+)[\\\\/]\\1\\.ipynb$/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "fabric-supersat.uploadNotebook",
+          "group": "navigation",
+          "when": "activeEditor != workbench.editor.notebook && resourcePath =~ /[\\\\/]src[\\\\/]Notebooks[\\\\/]([^\\\\/]+)[\\\\/]\\1\\.py$/"
+        }
+      ]
+    },
     "yamlValidation": [
       {
         "fileMatch": "**/.fabric-supersat/settings.yaml",
         "url": "./schemas/settings.schema.json"
+      },
+      {
+        "fileMatch": "**/src/Notebooks/*/notebook.yaml",
+        "url": "./schemas/notebook.schema.json"
       }
     ],
     "configuration": {
       "title": "Fabric Supersat",
       "properties": {
-        "fabric-supersat.auth.method": {
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "azureCli",
-            "vscode",
-            "token"
-          ],
-          "enumItemLabels": [
-            "Auto",
-            "Azure CLI",
-            "VS Code (app registration)",
-            "Pasted token"
-          ],
-          "markdownEnumDescriptions": [
-            "**Desktop:** Azure CLI. **Web:** VS Code sign-in if `#fabric-supersat.auth.clientId#` is set, otherwise a pasted token.",
-            "Use your `az login` account. No app registration needed. Desktop only: the Azure CLI must be installed where the extension runs (on the remote machine for SSH, WSL and containers).",
-            "Sign in through VS Code's Accounts menu with your own Microsoft Entra app registration (`#fabric-supersat.auth.clientId#`). Works on desktop and web.",
-            "Paste an access token obtained elsewhere. Stored in VS Code's secret storage until it expires (about an hour). Works on desktop and web."
-          ],
-          "markdownDescription": "How to sign in to Microsoft Fabric. See *Signing in to Fabric* in the README."
-        },
-        "fabric-supersat.auth.clientId": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Application (client) ID of your Microsoft Entra app registration. **Required for the `vscode` sign-in method** (VS Code's built-in app is not authorized for the Fabric API). See *Signing in to Fabric* in the README."
-        },
-        "fabric-supersat.auth.tenant": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Microsoft Entra tenant ID or domain, e.g. `contoso.onmicrosoft.com`. Used by the `azureCli` and `vscode` sign-in methods. Leave empty for your default tenant, or use **Fabric Supersat: Switch Tenant** to pick one. Required for single-tenant app registrations with the `vscode` method."
-        },
-        "fabric-supersat.workspace.id": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "markdownDescription": "ID of the Fabric workspace that commands work in when no folder is open. With a folder open, **Fabric Supersat: Select Workspace** saves the workspace in `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and this setting is ignored."
-        },
         "fabric-supersat.workspace.name": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Display name of `#fabric-supersat.workspace.id#`, shown in the status bar. Set by **Fabric Supersat: Select Workspace**."
+          "markdownDescription": "Name of the Fabric workspace that commands work in when no folder is open (or the folder isn't trusted). Its ID is looked up in Fabric by this name; a name shared by more than one workspace is refused. With a trusted folder open, **Fabric Supersat: Select Workspace** saves the name in `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and this setting is ignored."
         }
+      }
+    },
+    "configurationDefaults": {
+      "workbench.editorAssociations": {
+        "**/src/Notebooks/*/*.py": "fabric-supersat-notebook",
+        "**/*.Notebook/notebook-content.py": "fabric-supersat-notebook"
       }
     }
   },

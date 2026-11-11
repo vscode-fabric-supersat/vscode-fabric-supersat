@@ -1,7 +1,7 @@
 // Desktop only (Node.js extension host): runs the Azure CLI. Never import from shared code.
 import { execFile } from 'node:child_process';
-import { ID_PREFIX } from '../constants';
 import { accountLabel, decodeJwt } from '../auth/jwt';
+import { SAFE_TENANT } from '../auth/settings';
 import { AuthError, type Resource, type TokenProvider } from '../auth/types';
 
 /** Resource URIs passed to `az account get-access-token --resource`. */
@@ -21,13 +21,11 @@ export type ExecFn = (file: string, args: readonly string[]) => Promise<ExecResu
 /** Refresh tokens this long before they expire. */
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const INSTALL_URL = 'https://learn.microsoft.com/cli/azure/install-azure-cli';
-/** Tenant IDs and domains only; keeps the argument safe even when a shell is used (Windows). */
-const SAFE_TENANT = /^[A-Za-z0-9.-]{1,256}$/;
 /** `az login` commands suggested by the CLI that are safe to run in a terminal. */
 const SAFE_LOGIN_COMMAND = /^az login(?: --[a-z-]+(?: "?[A-Za-z0-9.:/_-]+"?)?)*$/;
 
 export interface AzureCliOptions {
-  /** Current `auth.tenant` setting ('' for the CLI's default). */
+  /** Current sign-in tenant ('' for the CLI's default). Re-checked against `SAFE_TENANT`, since a shell is used on Windows. */
   getTenant: () => string;
   /**
    * True when `az login` can't complete a browser sign-in on this machine (remote
@@ -53,7 +51,7 @@ interface AzTokenOutput {
 export class AzureCliTokenProvider implements TokenProvider {
   readonly method = 'azureCli';
   readonly label = 'Azure CLI';
-  readonly supportsTenantSwitching = true;
+  readonly canListTenants = true;
 
   private readonly cache = new Map<string, { token: string; expiresAt: number }>();
   private readonly getTenant: () => string;
@@ -71,9 +69,7 @@ export class AzureCliTokenProvider implements TokenProvider {
   async getToken(resource: Resource): Promise<string> {
     const tenant = this.getTenant();
     if (tenant && !SAFE_TENANT.test(tenant)) {
-      throw new AuthError(`"${tenant}" is not a valid tenant ID or domain.`, {
-        setting: `${ID_PREFIX}.auth.tenant`,
-      });
+      throw new AuthError(`"${tenant}" is not a valid tenant ID or domain.`, { configureSignIn: true });
     }
     const key = `${resource}|${tenant}`;
     const cached = this.cache.get(key);
@@ -156,8 +152,8 @@ export function toAuthError(
   if (e.code === 'ENOENT' || /'az' is not recognized|az: (command )?not found/i.test(stderr)) {
     return new AuthError(
       `The Azure CLI isn't installed (or isn't on the PATH of the machine running the VS Code ${preferDeviceCode ? 'remote ' : ''}extension host). ` +
-        `Install it, or choose another sign-in method in "${ID_PREFIX}.auth.method".`,
-      { link: { label: 'Install Azure CLI', url: INSTALL_URL }, setting: `${ID_PREFIX}.auth` },
+        `Install it, or choose another sign-in method with "Fabric Supersat: Configure Sign-In".`,
+      { link: { label: 'Install Azure CLI', url: INSTALL_URL }, configureSignIn: true },
     );
   }
   if (e instanceof SyntaxError) {

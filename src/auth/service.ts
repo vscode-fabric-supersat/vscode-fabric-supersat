@@ -1,9 +1,8 @@
-import { ID_PREFIX } from '../constants';
-import { getConfig } from '../util/config';
+import { type AuthMethodSetting, getAuthSettings } from './settings';
 import { getLogger } from '../util/logger';
 import { AuthError, type AuthMethod, type Resource, type TokenProvider } from './types';
 
-export type AuthMethodSetting = AuthMethod | 'auto';
+export type { AuthMethodSetting };
 
 /**
  * Chooses the sign-in method. `auto` prefers the Azure CLI (desktop only); without it,
@@ -19,7 +18,7 @@ export function resolveAuthMethod(
       throw new AuthError(
         `The "${setting}" sign-in method isn't available here` +
           (setting === 'azureCli' ? ' (the Azure CLI only works in VS Code Desktop).' : '.'),
-        { setting: `${ID_PREFIX}.auth` },
+        { configureSignIn: true },
       );
     }
     return setting;
@@ -30,7 +29,7 @@ export function resolveAuthMethod(
   return hasClientId && available.includes('vscode') ? 'vscode' : 'token';
 }
 
-/** Single entry point for tokens; delegates to the method chosen by the `auth.method` setting. */
+/** Single entry point for tokens; delegates to the method chosen by the sign-in settings (`settings.ts`). */
 export class FabricAuth {
   private readonly providers = new Map<AuthMethod, TokenProvider>();
 
@@ -42,9 +41,14 @@ export class FabricAuth {
 
   /** The provider for the current settings. */
   get provider(): TokenProvider {
-    const { method, clientId } = getConfig().auth;
+    const { method, clientId } = getAuthSettings();
     const resolved = resolveAuthMethod(method, [...this.providers.keys()], clientId !== '');
     return this.providers.get(resolved)!;
+  }
+
+  /** The sign-in methods this platform supports. */
+  get availableMethods(): AuthMethod[] {
+    return [...this.providers.keys()];
   }
 
   getToken(resource: Resource, reason: string): Promise<string> {
@@ -55,7 +59,7 @@ export class FabricAuth {
   async signIn(): Promise<string> {
     const provider = this.provider;
     const account = await provider.signIn();
-    const { tenant } = getConfig().auth;
+    const { tenant } = getAuthSettings();
     const message = `Signed in to Fabric as ${account} (${provider.label}${tenant ? `, tenant ${tenant}` : ''}).`;
     getLogger().info(message);
     return message;

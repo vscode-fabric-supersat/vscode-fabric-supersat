@@ -7,7 +7,12 @@ import * as vscode from 'vscode';
  */
 export class MemFs implements vscode.FileSystemProvider {
   private readonly files = new Map<string, Uint8Array>();
+  private readonly mtimes = new Map<string, number>();
+  /** Modified times increase with every write, so tests can rely on their order. */
+  private clock = 0;
   private readonly dirs = new Set<string>(['/']);
+  /** Paths reported as symbolic links (see `markSymlink`). */
+  private readonly links = new Set<string>();
   private readonly emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.emitter.event;
 
@@ -16,12 +21,13 @@ export class MemFs implements vscode.FileSystemProvider {
   }
 
   stat(uri: vscode.Uri): vscode.FileStat {
+    const link = this.links.has(uri.path) ? vscode.FileType.SymbolicLink : 0;
     const file = this.files.get(uri.path);
     if (file) {
-      return { type: vscode.FileType.File, ctime: 0, mtime: Date.now(), size: file.byteLength };
+      return { type: vscode.FileType.File | link, ctime: 0, mtime: this.mtimes.get(uri.path) ?? 0, size: file.byteLength };
     }
     if (this.dirs.has(uri.path)) {
-      return { type: vscode.FileType.Directory, ctime: 0, mtime: 0, size: 0 };
+      return { type: vscode.FileType.Directory | link, ctime: 0, mtime: 0, size: 0 };
     }
     throw vscode.FileSystemError.FileNotFound(uri);
   }
@@ -56,6 +62,7 @@ export class MemFs implements vscode.FileSystemProvider {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     this.files.set(uri.path, content);
+    this.mtimes.set(uri.path, ++this.clock);
   }
 
   delete(uri: vscode.Uri): void {
@@ -67,6 +74,11 @@ export class MemFs implements vscode.FileSystemProvider {
   rename(oldUri: vscode.Uri, newUri: vscode.Uri): void {
     this.writeFile(newUri, this.readFile(oldUri));
     this.files.delete(oldUri.path);
+  }
+
+  /** Test helper: reports an existing file or folder as a symbolic link, as a disk would. */
+  markSymlink(path: string): void {
+    this.links.add(path);
   }
 
   /** Test helper: the file's text, or `undefined` if it doesn't exist. */

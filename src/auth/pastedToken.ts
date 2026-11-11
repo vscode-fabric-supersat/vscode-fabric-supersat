@@ -37,7 +37,7 @@ export interface PastedTokenDeps {
 export class PastedTokenProvider implements TokenProvider {
   readonly method = 'token';
   readonly label = 'Pasted access token';
-  readonly supportsTenantSwitching = false;
+  readonly canListTenants = false;
 
   private readonly now: () => number;
 
@@ -69,8 +69,8 @@ export class PastedTokenProvider implements TokenProvider {
   async getToken(resource: Resource, reason: string): Promise<string> {
     if (resource !== 'fabric') {
       throw new AuthError(
-        'Switch Tenant needs the Azure CLI or VS Code sign-in. A pasted token only works for the tenant it was issued in.',
-        { setting: `${ID_PREFIX}.auth` },
+        'Listing tenants needs the Azure CLI or VS Code sign-in. A pasted token only works for the tenant it was issued in.',
+        { configureSignIn: true },
       );
     }
     const stored = await this.deps.secrets.get(SECRET_KEY);

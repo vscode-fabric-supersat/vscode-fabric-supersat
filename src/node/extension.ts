@@ -1,14 +1,14 @@
 // Desktop entry point (package.json "main"). May use Node.js APIs.
 import * as vscode from 'vscode';
 import { createExtension } from '../extension';
-import { getConfig } from '../util/config';
+import { getAuthSettings } from '../auth/settings';
 import { AzureCliTokenProvider } from './azureCli';
 
 export const { activate, deactivate } = createExtension({
   name: 'desktop',
   platformTokenProviders: () => [
     new AzureCliTokenProvider({
-      getTenant: () => getConfig().auth.tenant,
+      getTenant: () => getAuthSettings().tenant,
       preferDeviceCode: cannotOpenLocalBrowser(),
     }),
   ],

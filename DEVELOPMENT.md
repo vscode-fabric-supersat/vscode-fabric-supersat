@@ -36,14 +36,14 @@ To try it in a real browser: `npm run run:web`, then open http://localhost:3000.
 
 ```sh
 sudo apt-get update && sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libcairo2 libgtk-3-0 \
-  libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libasound2t64 libatspi2.0-0
+  libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2t64 libatspi2.0-0
 
 npx playwright install chromium   # for npm run test:web
 
 sudo npx playwright install-deps chromium   # for the browser tests alone install what Chromium needs
 ```
 
-On older releases (before Debian 13 / Ubuntu 24.04) the sound library is `libasound2` instead of `libasound2t64`.
+On older releases (before Debian 13 / Ubuntu 24.04) the sound library is `libasound2` instead of `libasound2t64`. `libnss3` also installs `libnspr4`, the first library VS Code reports missing in a fresh container. Last checked on Ubuntu 26.04 with VS Code 1.146.
 
 Then run:
 
@@ -52,7 +52,7 @@ xvfb-run -a npm test    # desktop tests (shared + desktop-only)
 npm run test:web        # the shared tests in headless Chromium
 ```
 
-If VS Code fails with `error while loading shared libraries: <name>.so`, list what's still missing with `ldd .vscode-test/vscode-linux-x64-*/code | grep 'not found'`.
+If VS Code fails with `error while loading shared libraries: <name>.so`, list what's still missing with `ldd .vscode-test/vscode-linux-x64-*/code | grep 'not found'` (no output means nothing is missing). Find the package that provides a library with `apt-file search <name>.so` (from the `apt-file` package), and add it to the list above.
 
 ## Layout
 
@@ -67,32 +67,41 @@ src/
   constants.ts        command IDs and the setting prefix
   auth/
     types.ts          TokenProvider interface, AuthError
-    service.ts        picks the sign-in method (auth.method setting)
+    settings.ts       sign-in method, client ID and tenant (extension state, never settings files)
+    service.ts        picks the sign-in method
     vscodeSession.ts  VS Code sign-in with your app registration
     pastedToken.ts    pasted access token (SecretStorage)
     jwt.ts            reads token claims (account, audience, expiry)
   fabric/
-    client.ts         Fabric REST API client (paging, throttling, errors)
+    client.ts         Fabric REST API client (paging, throttling, long-running operations, errors)
     tenants.ts        lists the user's Entra tenants (Azure Resource Manager)
   features/
     feature.ts        Feature interface
     index.ts          list of registered features
     log.ts            "Show Log" command
     settings.ts       "Open Settings" command
-    fabricAuth.ts     "Sign In", "Sign Out" and "Switch Tenant" commands
+    fabricAuth.ts     "Sign In", "Sign Out" and "Configure Sign-In" (method, client ID, tenant) commands
     workspace.ts      "Select Workspace" command and status bar item
-    notebooks.ts      "List Notebooks" command
+    notebooks.ts      notebook download/upload commands, notebook editor, sync on save
+  notebooks/
+    format.ts         Fabric Git format (.py) <-> Jupyter (.ipynb) conversion (no vscode dependency)
+    files.ts          a notebook's two local files, by name, and syncing them
+    serializer.ts     opens src/Notebooks/<Name>/<Name>.py in the notebook editor
+    transfer.ts       download and upload (by name) against the Fabric API
   workspace/
-    service.ts        current Fabric workspace (.fabric-supersat/settings.yaml or user settings) and its picker
+    service.ts        current Fabric workspace, saved by name (.fabric-supersat/settings.yaml or user settings); ID looked up in Fabric, and its picker
   util/
     config.ts         typed settings accessor
     errors.ts         error message + log helper
     progress.ts       progress notification helper
+    localState.ts     project folder, the git-ignored .fabric-supersat folder, symlink-safe write check
+    base64.ts         base64 for item definition parts (desktop and web)
     yamlFile.ts       reads and updates YAML files, keeping comments and layout
     logger.ts         shared LogOutputChannel
   test/
     suite/*.test.ts   tests that run on both desktop and web
     suite/memFs.ts    in-memory file system for tests that read and write files
+    suite/fixtures/   real Fabric exports used as test data (add more as formats are confirmed)
     node/*.test.ts    desktop-only tests
     web/index.ts      browser mocha runner (imports test files explicitly)
 schemas/              JSON schemas for the YAML files (package.json "yamlValidation")

@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { ID_PREFIX } from '../constants';
-import { getConfig } from '../util/config';
+import { getAuthSettings } from './settings';
 import { AuthError, type Resource, type TokenProvider } from './types';
 
 /** VS Code's built-in Microsoft (Entra ID) authentication provider. */
@@ -27,12 +26,12 @@ const SCOPES: Record<Resource, string> = { fabric: FABRIC_SCOPE, arm: ARM_SCOPE 
  * pre-authorized by Microsoft for the Fabric API and always fails with AADSTS65002.
  */
 export function getSessionScopes(resource: Resource = 'fabric'): string[] {
-  const { clientId, tenant } = getConfig().auth;
+  const { clientId, tenant } = getAuthSettings();
   if (!clientId) {
     throw new AuthError(
-      `Signing in with VS Code needs your own Microsoft Entra app registration. Set "${ID_PREFIX}.auth.clientId" ` +
-        '(see "Signing in to Fabric" in the README).',
-      { setting: `${ID_PREFIX}.auth` },
+      `Signing in with VS Code needs your own Microsoft Entra app registration. Set its client ID with ` +
+        '"Fabric Supersat: Configure Sign-In" (see "Signing in to Fabric" in the README).',
+      { configureSignIn: true },
     );
   }
   const scopes = [`VSCODE_CLIENT_ID:${clientId}`];
@@ -47,7 +46,7 @@ export function getSessionScopes(resource: Resource = 'fabric'): string[] {
 export class VscodeSessionProvider implements TokenProvider {
   readonly method = 'vscode';
   readonly label = 'VS Code (Microsoft account)';
-  readonly supportsTenantSwitching = true;
+  readonly canListTenants = true;
 
   async getToken(resource: Resource, reason: string): Promise<string> {
     // Returns an existing session silently; otherwise prompts, showing `reason`.
