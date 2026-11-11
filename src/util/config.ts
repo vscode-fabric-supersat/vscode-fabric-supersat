@@ -11,5 +11,9 @@ export function getConfig() {
       clientId: config.get<string>('auth.clientId', '').trim(),
       tenant: config.get<string>('auth.tenant', '').trim(),
     },
+    workspace: {
+      id: config.get<string>('workspace.id', '').trim(),
+      name: config.get<string>('workspace.name', '').trim(),
+    },
   };
 }

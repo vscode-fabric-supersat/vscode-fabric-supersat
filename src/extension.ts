@@ -3,9 +3,11 @@ import { PastedTokenProvider } from './auth/pastedToken';
 import { FabricAuth } from './auth/service';
 import type { TokenProvider } from './auth/types';
 import { VscodeSessionProvider } from './auth/vscodeSession';
+import { FabricClient } from './fabric/client';
 import type { Services } from './features/feature';
 import { features } from './features';
 import { disposeLogger, getLogger } from './util/logger';
+import { WorkspaceService, createWorkspacePicker } from './workspace/service';
 
 /** What differs between the desktop (Node.js) and web (browser) builds. */
 export interface Platform {
@@ -25,20 +27,24 @@ export function createExtension(platform: Platform) {
       const logger = getLogger();
       logger.info(`Activating ${platform.name} build (${vscode.env.appName}, ${vscode.UIKind[vscode.env.uiKind]})`);
 
-      const services: Services = {
-        auth: new FabricAuth([
-          ...platform.platformTokenProviders(context),
-          new VscodeSessionProvider(),
-          new PastedTokenProvider({
-            secrets: context.secrets,
-            prompt: (options) => vscode.window.showInputBox(options),
-            showHelp: (message) => {
-              logger.info(message);
-              logger.show(true); // keep focus in the input box
-            },
-          }),
-        ]),
-      };
+      const auth = new FabricAuth([
+        ...platform.platformTokenProviders(context),
+        new VscodeSessionProvider(),
+        new PastedTokenProvider({
+          secrets: context.secrets,
+          prompt: (options) => vscode.window.showInputBox(options),
+          showHelp: (message) => {
+            logger.info(message);
+            logger.show(true); // keep focus in the input box
+          },
+        }),
+      ]);
+      const fabric = new FabricClient({
+        getToken: () => auth.getToken('fabric', 'Fabric Supersat needs to sign in to read your Fabric workspaces.'),
+      });
+      const workspace = new WorkspaceService({ pick: createWorkspacePicker(fabric) });
+      context.subscriptions.push(workspace);
+      const services: Services = { auth, fabric, workspace };
 
       for (const feature of features) {
         try {

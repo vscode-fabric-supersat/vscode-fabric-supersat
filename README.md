@@ -16,8 +16,42 @@ This Visual Studio Code extension runs in **VS Code Desktop** and **VS Code for 
 | `Fabric Supersat: Open Settings` | Opens the Settings editor filtered to this extension's settings. |
 | `Fabric Supersat: Sign In to Fabric` | Signs in with the configured method (see below) and shows the account. |
 | `Fabric Supersat: Sign Out of Fabric` | Forgets a pasted token, or tells you how to sign out for the other methods. |
-| `Fabric Supersat: Switch Tenant` | Lists your Microsoft Entra tenants and signs in to the one you pick (saved in `fabric-supersat.auth.tenant`). Azure CLI and VS Code methods only. |
-| `Fabric Supersat: List Notebooks` | Pick a workspace, then browse its notebooks. Selecting a notebook copies its ID. Signs you in first if needed. |
+| `Fabric Supersat: Switch Tenant` | Lists your Microsoft Entra tenants and signs in to the one you pick (saved in `fabric-supersat.auth.tenant`). Clears the saved workspace if the tenant changes. Azure CLI and VS Code methods only. |
+| `Fabric Supersat: Select Workspace` | Lists your Fabric workspaces and saves the one you pick as the current workspace (see [Current Workspace](#current-workspace)). Also available by clicking the workspace in the status bar. |
+| `Fabric Supersat: List Notebooks` | Browse the notebooks in the current workspace. Selecting a notebook copies its ID. Asks for a workspace if none is selected, and signs you in first if needed. |
+
+## Current Workspace
+
+Commands that work in a Fabric workspace use the current workspace. Pick it with **Fabric Supersat: Select Workspace** or the status bar item. If none is selected, the first command that needs one asks you to pick it and remembers your choice.
+
+Where it's saved:
+
+| Situation | Saved in |
+| --- | --- |
+| A folder is open | `.fabric-supersat/settings.yaml` in that folder (the first folder of a multi-root workspace). |
+| No folder open, or the folder is read-only (some virtual workspaces) | User settings `fabric-supersat.workspace.id` and `fabric-supersat.workspace.name`. |
+
+The `.fabric-supersat` folder is local to you and is never committed: the extension puts a `.gitignore` containing `*` inside it, so git ignores the whole folder without any change to your project's own `.gitignore`. Each person working on the project picks their own workspace (for example their own dev workspace).
+
+Only one of the two is used at a time: while a folder is open, the user settings are ignored, so a new project starts with no workspace selected and asks for one.
+
+`settings.yaml` is meant to be read and edited by hand. Your comments and layout are kept when the extension updates it, and the status bar updates when you save it:
+
+```yaml
+# Fabric Supersat settings for this project.
+# They are yours only: this folder is ignored by git. Edit them here or with
+# Fabric Supersat commands; your comments and layout are kept.
+
+# Fabric workspace that commands work in.
+# Change it with "Fabric Supersat: Select Workspace".
+workspace:
+  id: "00000000-0000-0000-0000-000000000000"
+  name: "Sales (dev)"
+```
+
+With Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml) installed, editing the file gives autocomplete, descriptions on hover and warnings for typos. Without it the file is still plain YAML. If the file has a YAML error, it is ignored (no workspace is selected) and the extension won't overwrite it; the error message names the line.
+
+**Switch Tenant** clears the saved workspace (blanking it in the file, and in the user settings) when the tenant changes, since workspaces belong to a tenant; the next command that needs one asks you to pick it.
 
 ## Signing in to Fabric
 
@@ -129,90 +163,18 @@ Note: GitHub delivers it inside a zip, so an unzip is required to get the .vsix.
 
 ## Development
 
-Requires Node.js 22 or later.
+Building, testing, the source layout and how to add a feature are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-```sh
-npm install
-npm run watch        # type-check + rebuild on change
-```
+### Test Results
 
-Press **F5** in VS Code and pick a launch config:
+Run: 2026-11-11, on Linux (headless, with `xvfb-run`).
 
-- **Run Extension (Desktop)** runs the Node.js extension host using `dist/node/extension.js`.
-- **Run Extension (Web Worker)** runs the browser extension host inside desktop VS Code using `dist/web/extension.js`.
+| Suite | Command | Runs | Result |
+| --- | --- | --- | --- |
+| Desktop | `xvfb-run -a npm test` | Shared and desktop-only tests in VS Code 1.145.3 | 65 passing, 0 failing |
+| Web | `npm run test:web` | Shared tests in headless Chromium | 53 passing, 0 failing |
 
-To try it in a real browser: `npm run run:web`, then open http://localhost:3000.
-
-### Scripts
-
-| Script | What it does |
-| --- | --- |
-| `npm run compile` | Type-check, lint, and build both bundles. |
-| `npm run package` | Production (minified) build. |
-| `npm test` | Run tests in desktop VS Code (Electron). On headless Linux, use `xvfb-run -a npm test`. |
-| `npm run test:web` | Run the same tests in headless Chromium. Needs `npx playwright install chromium` once. |
-| `npm run icon` | Re-render `icon.png` from `images/icon.svg`. Needs `npx playwright install chromium` once. |
-| `npm run vsce:package` | Build a `.vsix`. |
-| `code --install-extension ./vscode-fabric-supersat-0.0.1.vsix` | Install `.vsix` in VS Code. |
-
-## Layout
-
-```
-src/
-  extension.ts        shared activation (createExtension), used by both entry points
-  node/
-    extension.ts      desktop entry point (package.json "main")
-    azureCli.ts       Azure CLI sign-in (desktop only: runs `az`)
-  web/
-    extension.ts      web entry point (package.json "browser")
-  constants.ts        command IDs and the setting prefix
-  auth/
-    types.ts          TokenProvider interface, AuthError
-    service.ts        picks the sign-in method (auth.method setting)
-    vscodeSession.ts  VS Code sign-in with your app registration
-    pastedToken.ts    pasted access token (SecretStorage)
-    jwt.ts            reads token claims (account, audience, expiry)
-  fabric/
-    client.ts         Fabric REST API client (paging, throttling, errors)
-    tenants.ts        lists the user's Entra tenants (Azure Resource Manager)
-  features/
-    feature.ts        Feature interface
-    index.ts          list of registered features
-    log.ts            "Show Log" command
-    settings.ts       "Open Settings" command
-    fabricAuth.ts     "Sign In", "Sign Out" and "Switch Tenant" commands
-    notebooks.ts      "List Notebooks" command
-  util/
-    config.ts         typed settings accessor
-    errors.ts         error message + log helper
-    logger.ts         shared LogOutputChannel
-  test/
-    suite/*.test.ts   tests that run on both desktop and web
-    node/*.test.ts    desktop-only tests
-    web/index.ts      browser mocha runner (imports test files explicitly)
-esbuild.mjs           builds dist/node, dist/web and the web test bundle
-images/icon.svg       icon source (npm run icon renders it to icon.png)
-```
-
-## Adding a Feature
-
-1. Create `src/features/myFeature.ts` that exports a `Feature` and registers its disposables on `context.subscriptions`. Its `activate(context, services)` also receives shared services, such as `services.auth` for Fabric tokens.
-2. Add it to the array in `src/features/index.ts`.
-3. Declare its commands, settings, views and so on under `contributes` in `package.json`, and add the IDs to `src/constants.ts`.
-4. Add tests in `src/test/suite/`, and import new test files in `src/test/web/index.ts`.
-
-### Desktop and Web Rules
-
-Feature code runs in both a Node.js host and a browser **web worker**, so:
-
-- Use `vscode.workspace.fs` and `vscode.Uri`, not `fs` or `path`.
-- Use `fetch`, not `http`/`https`.
-- Don't spawn processes or use other Node-only modules in shared code. Put desktop-only code in `src/node/` and wire it in from `src/node/extension.ts` (as the Azure CLI sign-in is). Its tests go in `src/test/node/`.
-- Don't assume `file://` URIs. Workspaces may be virtual (`vscode-vfs://`, `vscode-test-web://`).
-
-## Before Publishing
-
-- The extension ID is `publisher.name`; keep `EXTENSION_FULL_ID` in `src/constants.ts` in sync if either changes.
+The web run has fewer tests because the desktop-only ones (Azure CLI sign-in) can't run in a browser.
 
 ## Disclaimer
 

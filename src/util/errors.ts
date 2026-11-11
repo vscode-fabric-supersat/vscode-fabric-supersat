@@ -41,6 +41,10 @@ function fixFor(err: unknown, message: string): Fix {
   if (err instanceof FabricApiError && err.status === 401) {
     return { hint: 'Your sign-in may have expired: run "Fabric Supersat: Sign In to Fabric".', setting: AUTH_SETTINGS };
   }
+  if (err instanceof FabricApiError && (err.status === 403 || err.status === 404)) {
+    // Usually a saved workspace that was deleted, or that belongs to another tenant.
+    return { hint: 'Check the workspace: run "Fabric Supersat: Select Workspace".', setting: `${ID_PREFIX}.workspace` };
+  }
   const code = /AADSTS\d+/.exec(message)?.[0];
   return (code && ENTRA_HINTS[code]) || {};
 }

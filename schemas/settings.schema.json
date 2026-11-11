@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat/schemas/settings.schema.json",
+  "title": "Fabric Supersat project settings",
+  "description": "Local settings in .fabric-supersat/settings.yaml. Yours only: the folder is ignored by git.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "workspace": {
+      "description": "Fabric workspace that commands work in. Change it with \"Fabric Supersat: Select Workspace\".",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Workspace ID (a GUID), as shown in the workspace URL: app.fabric.microsoft.com/groups/<id>. Empty when none is selected.",
+          "type": "string",
+          "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "patternErrorMessage": "Expected a workspace ID like 00000000-0000-0000-0000-000000000000, or \"\"."
+        },
+        "name": {
+          "description": "Workspace display name, shown in the status bar. Informational: the ID decides which workspace is used.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

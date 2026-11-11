@@ -54,9 +54,20 @@
         "category": "Fabric Supersat"
       },
       {
+        "command": "fabric-supersat.selectWorkspace",
+        "title": "Select Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
         "command": "fabric-supersat.listNotebooks",
         "title": "List Notebooks",
         "category": "Fabric Supersat"
+      }
+    ],
+    "yamlValidation": [
+      {
+        "fileMatch": "**/.fabric-supersat/settings.yaml",
+        "url": "./schemas/settings.schema.json"
       }
     ],
     "configuration": {
@@ -94,6 +105,18 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Microsoft Entra tenant ID or domain, e.g. `contoso.onmicrosoft.com`. Used by the `azureCli` and `vscode` sign-in methods. Leave empty for your default tenant, or use **Fabric Supersat: Switch Tenant** to pick one. Required for single-tenant app registrations with the `vscode` method."
+        },
+        "fabric-supersat.workspace.id": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "ID of the Fabric workspace that commands work in when no folder is open. With a folder open, **Fabric Supersat: Select Workspace** saves the workspace in `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and this setting is ignored."
+        },
+        "fabric-supersat.workspace.name": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Display name of `#fabric-supersat.workspace.id#`, shown in the status bar. Set by **Fabric Supersat: Select Workspace**."
         }
       }
     }
@@ -140,5 +163,8 @@
         "diff": "^8.0.3"
       }
     }
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
   }
 }

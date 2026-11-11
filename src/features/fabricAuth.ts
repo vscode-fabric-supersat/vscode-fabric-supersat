@@ -6,12 +6,13 @@ import { listTenants } from '../fabric/tenants';
 import { getConfig } from '../util/config';
 import { reportError } from '../util/errors';
 import { getLogger } from '../util/logger';
+import type { WorkspaceService } from '../workspace/service';
 import type { Feature } from './feature';
 
 /** "Sign In to Fabric", "Sign Out" and "Switch Tenant", for whichever sign-in method is configured. */
 export const fabricAuth: Feature = {
   name: 'fabricAuth',
-  activate(context, { auth }) {
+  activate(context, { auth, workspace }) {
     context.subscriptions.push(
       vscode.commands.registerCommand(Commands.signIn, async () => {
         try {
@@ -36,7 +37,7 @@ export const fabricAuth: Feature = {
 
       vscode.commands.registerCommand(Commands.switchTenant, async () => {
         try {
-          return await switchTenant(auth);
+          return await switchTenant(auth, workspace);
         } catch (err) {
           await reportError('Switch tenant', err);
           return undefined;
@@ -48,9 +49,10 @@ export const fabricAuth: Feature = {
 
 /**
  * Lets the user pick one of their tenants, stores it in the `auth.tenant` setting (user
- * scope) and signs in to it. Returns the chosen tenant ID.
+ * scope) and signs in to it. Clears the saved workspace when the tenant changes, since
+ * workspaces belong to a tenant. Returns the chosen tenant ID.
  */
-async function switchTenant(auth: FabricAuth): Promise<string | undefined> {
+async function switchTenant(auth: FabricAuth, workspace: WorkspaceService): Promise<string | undefined> {
   const provider = auth.provider;
   if (!provider.supportsTenantSwitching) {
     throw new AuthError(
@@ -65,19 +67,17 @@ async function switchTenant(auth: FabricAuth): Promise<string | undefined> {
   const current = getConfig().auth.tenant.toLowerCase();
   const picked = await vscode.window.showQuickPick(
     tenants
-      .map((t) => ({
-        label: t.displayName ?? t.defaultDomain ?? t.tenantId,
-        description: [
-          t.defaultDomain,
-          current && (t.tenantId.toLowerCase() === current || t.defaultDomain?.toLowerCase() === current)
-            ? '(current)'
-            : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-        detail: t.tenantId,
-        tenantId: t.tenantId,
-      }))
+      .map((t) => {
+        const isCurrent =
+          !!current && (t.tenantId.toLowerCase() === current || t.defaultDomain?.toLowerCase() === current);
+        return {
+          label: t.displayName ?? t.defaultDomain ?? t.tenantId,
+          description: [t.defaultDomain, isCurrent ? '(current)' : ''].filter(Boolean).join(' '),
+          detail: t.tenantId,
+          tenantId: t.tenantId,
+          isCurrent,
+        };
+      })
       .sort((a, b) => a.label.localeCompare(b.label)),
     {
       title: 'Fabric: Switch Tenant',
@@ -94,6 +94,10 @@ async function switchTenant(auth: FabricAuth): Promise<string | undefined> {
     .getConfiguration(ID_PREFIX)
     .update('auth.tenant', picked.tenantId, vscode.ConfigurationTarget.Global);
   getLogger().info(`Switched Fabric tenant to ${picked.label} (${picked.tenantId})`);
+  if (!picked.isCurrent && workspace.current) {
+    await workspace.save(undefined);
+    getLogger().info('Cleared the saved Fabric workspace (it belongs to the previous tenant)');
+  }
   void vscode.window.showInformationMessage(await auth.signIn());
   return picked.tenantId;
 }

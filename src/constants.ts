@@ -10,5 +10,6 @@ export const Commands = {
   signIn: `${ID_PREFIX}.signIn`,
   signOut: `${ID_PREFIX}.signOut`,
   switchTenant: `${ID_PREFIX}.switchTenant`,
+  selectWorkspace: `${ID_PREFIX}.selectWorkspace`,
   listNotebooks: `${ID_PREFIX}.listNotebooks`,
 } as const;
