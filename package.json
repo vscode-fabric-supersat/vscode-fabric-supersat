@@ -17,13 +17,16 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/node/extension.js",
   "browser": "./dist/web/extension.js",
   "capabilities": {
     "virtualWorkspaces": true,
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": "limited",
+      "description": "In Restricted Mode, the folder's .fabric-supersat/settings.yaml isn't used: the selected Fabric workspace comes from your user settings until you trust the folder. The notebook settings in src/fabric-supersat.yaml apply in every mode, like the notebook files, and a notebook's two files are still kept in sync."
     }
   },
   "contributes": {
@@ -49,8 +52,8 @@
         "category": "Fabric Supersat"
       },
       {
-        "command": "fabric-supersat.switchTenant",
-        "title": "Switch Tenant",
+        "command": "fabric-supersat.configureSignIn",
+        "title": "Configure Sign-In",
         "category": "Fabric Supersat"
       },
       {
@@ -59,65 +62,312 @@
         "category": "Fabric Supersat"
       },
       {
-        "command": "fabric-supersat.listNotebooks",
-        "title": "List Notebooks",
+        "command": "fabric-supersat.downloadNotebook",
+        "title": "Download Notebook",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.downloadAllNotebooks",
+        "title": "Download All Notebooks",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.downloadEnvironment",
+        "title": "Download Environment",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.downloadAllEnvironments",
+        "title": "Download All Environments",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.uploadEnvironment",
+        "title": "Upload Environment",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.uploadAllEnvironments",
+        "title": "Upload All Environments",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.publishEnvironment",
+        "title": "Publish Environment",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.compareEnvironmentWithWorkspace",
+        "title": "Compare Environment with Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.compareAllEnvironmentsWithWorkspace",
+        "title": "Compare All Environments with Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.newEnvironment",
+        "title": "Create New Environment",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.deleteEnvironment",
+        "title": "Delete Environment",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.newNotebook",
+        "title": "Create New Fabric Notebook",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.uploadNotebook",
+        "title": "Save and Upload Notebook",
+        "category": "Fabric Supersat",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "fabric-supersat.switchNotebookFile",
+        "title": "Switch Between .py and .ipynb",
+        "category": "Fabric Supersat",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "fabric-supersat.clearAndRunAll",
+        "title": "Clear and Run All",
+        "category": "Fabric Supersat",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "fabric-supersat.refreshWorkspaceInformation",
+        "title": "Refresh Workspace Information",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.testNotebookFormats",
+        "title": "Test Notebook Formats",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.compareAllNotebooksWithWorkspace",
+        "title": "Compare All Notebooks with Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.compareNotebookWithWorkspace",
+        "title": "Compare Notebook with Workspace",
+        "category": "Fabric Supersat",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "fabric-supersat.syncWorkspace",
+        "title": "Sync Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.uploadAllNotebooks",
+        "title": "Upload All Notebooks",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.deleteAllNotebooks",
+        "title": "Delete All Notebooks in Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.deleteNotebook",
+        "title": "Delete Notebook",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.useFabricDataEngineering",
+        "title": "Use Fabric Data Engineering (Experimental)",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.stopUsingFabricDataEngineering",
+        "title": "Stop Using Fabric Data Engineering",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.logFabricDataEngineeringStructure",
+        "title": "Log Fabric Data Engineering Structure",
         "category": "Fabric Supersat"
       }
     ],
+    "notebooks": [
+      {
+        "type": "fabric-supersat-notebook",
+        "displayName": "Fabric Notebook (Git format)",
+        "selector": [
+          {
+            "filenamePattern": "*.py"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "fabric-supersat.useFabricDataEngineering",
+          "when": "!isWeb"
+        },
+        {
+          "command": "fabric-supersat.stopUsingFabricDataEngineering",
+          "when": "!isWeb"
+        },
+        {
+          "command": "fabric-supersat.logFabricDataEngineeringStructure",
+          "when": "!isWeb"
+        }
+      ],
+      "notebook/toolbar": [
+        {
+          "command": "fabric-supersat.deleteNotebook",
+          "group": "z_fabric",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        },
+        {
+          "command": "fabric-supersat.clearAndRunAll",
+          "group": "navigation/execute@10",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        },
+        {
+          "command": "fabric-supersat.switchNotebookFile",
+          "group": "navigation@97",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        },
+        {
+          "command": "fabric-supersat.compareNotebookWithWorkspace",
+          "group": "navigation@98",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        },
+        {
+          "command": "fabric-supersat.uploadNotebook",
+          "group": "navigation@99",
+          "when": "notebookType == fabric-supersat-notebook || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "fabric-supersat.deleteNotebook",
+          "group": "7_modification@99",
+          "when": "resourcePath =~ /[\\\\/]src[\\\\/]Notebooks[\\\\/]([^\\\\/]+)([\\\\/]\\1\\.py)?$/ || resourcePath =~ /[\\\\/]\\.fabric-supersat[\\\\/](Notebooks|fabric-de[\\\\/][^\\\\/]+[\\\\/]SynapseNotebook[\\\\/][^\\\\/]+)[\\\\/]([^\\\\/]+)[\\\\/]\\2\\.ipynb$/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "fabric-supersat.switchNotebookFile",
+          "group": "navigation",
+          "when": "activeEditor != workbench.editor.notebook && resourcePath =~ /[\\\\/]src[\\\\/]Notebooks[\\\\/]([^\\\\/]+)[\\\\/]\\1\\.py$/"
+        },
+        {
+          "command": "fabric-supersat.compareNotebookWithWorkspace",
+          "group": "navigation",
+          "when": "activeEditor != workbench.editor.notebook && resourcePath =~ /[\\\\/]src[\\\\/]Notebooks[\\\\/]([^\\\\/]+)[\\\\/]\\1\\.py$/"
+        },
+        {
+          "command": "fabric-supersat.uploadNotebook",
+          "group": "navigation",
+          "when": "activeEditor != workbench.editor.notebook && resourcePath =~ /[\\\\/]src[\\\\/]Notebooks[\\\\/]([^\\\\/]+)[\\\\/]\\1\\.py$/"
+        }
+      ]
+    },
     "yamlValidation": [
       {
         "fileMatch": "**/.fabric-supersat/settings.yaml",
         "url": "./schemas/settings.schema.json"
+      },
+      {
+        "fileMatch": "**/src/fabric-supersat.yaml",
+        "url": "./schemas/notebook-settings.schema.json"
+      },
+      {
+        "fileMatch": "**/src/Notebooks/*/*.yaml",
+        "url": "./schemas/notebook.schema.json"
+      },
+      {
+        "fileMatch": "**/src/Environments/*/*.yaml",
+        "url": "./schemas/environment.schema.json"
       }
     ],
     "configuration": {
       "title": "Fabric Supersat",
       "properties": {
-        "fabric-supersat.auth.method": {
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "azureCli",
-            "vscode",
-            "token"
-          ],
-          "enumItemLabels": [
-            "Auto",
-            "Azure CLI",
-            "VS Code (app registration)",
-            "Pasted token"
-          ],
-          "markdownEnumDescriptions": [
-            "**Desktop:** Azure CLI. **Web:** VS Code sign-in if `#fabric-supersat.auth.clientId#` is set, otherwise a pasted token.",
-            "Use your `az login` account. No app registration needed. Desktop only: the Azure CLI must be installed where the extension runs (on the remote machine for SSH, WSL and containers).",
-            "Sign in through VS Code's Accounts menu with your own Microsoft Entra app registration (`#fabric-supersat.auth.clientId#`). Works on desktop and web.",
-            "Paste an access token obtained elsewhere. Stored in VS Code's secret storage until it expires (about an hour). Works on desktop and web."
-          ],
-          "markdownDescription": "How to sign in to Microsoft Fabric. See *Signing in to Fabric* in the README."
-        },
-        "fabric-supersat.auth.clientId": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Application (client) ID of your Microsoft Entra app registration. **Required for the `vscode` sign-in method** (VS Code's built-in app is not authorized for the Fabric API). See *Signing in to Fabric* in the README."
-        },
-        "fabric-supersat.auth.tenant": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Microsoft Entra tenant ID or domain, e.g. `contoso.onmicrosoft.com`. Used by the `azureCli` and `vscode` sign-in methods. Leave empty for your default tenant, or use **Fabric Supersat: Switch Tenant** to pick one. Required for single-tenant app registrations with the `vscode` method."
-        },
-        "fabric-supersat.workspace.id": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "markdownDescription": "ID of the Fabric workspace that commands work in when no folder is open. With a folder open, **Fabric Supersat: Select Workspace** saves the workspace in `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and this setting is ignored."
-        },
         "fabric-supersat.workspace.name": {
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Display name of `#fabric-supersat.workspace.id#`, shown in the status bar. Set by **Fabric Supersat: Select Workspace**."
+          "markdownDescription": "Name of the selected Fabric workspace, which commands work in, when no folder is open (or the folder isn't trusted or is read-only). Its ID is looked up in Fabric by this name; if more than one workspace has the name, you're asked which one (for the session). With a trusted folder open, the workspace is read from `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and kept in sync with this setting: **Fabric Supersat: Select Workspace** saves both, editing either one in the window you're using updates the other (the file only if it exists), and opening a folder copies the workspace named in its file here."
+        },
+        "fabric-supersat.diagnostics.logToFiles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Keep diagnostic files in the project's `.fabric-supersat` folder (git-ignored): `diagnostics/requests.jsonl` (each Fabric request's timing, never tokens or contents), `diagnostics/fabric-supersat.log` (a copy of the Output channel) and `diagnostics/history.jsonl` (each notebook download and upload). Each file is capped in size. Nothing is written until the folder exists."
+        },
+        "fabric-supersat.reports.openWhenDone": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Open the Markdown report in a preview when **Refresh Workspace Information** or **Test Notebook Formats** finishes. Turn off to get a notification with an **Open Report** button instead."
+        },
+        "fabric-supersat.metadata.includeMemberRoles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Include who has which role in the workspace (names and email addresses) in **Refresh Workspace Information**. Needs a workspace role that can see them; otherwise the section is listed as not available."
+        },
+        "fabric-supersat.notebooks.pythonVersion": {
+          "type": "string",
+          "default": "3.12",
+          "pattern": "^\\s*3\\.\\d{1,2}\\s*$",
+          "patternErrorMessage": "A Python version such as 3.12 (major.minor).",
+          "scope": "window",
+          "markdownDescription": "Python version of new **Python** (non-Spark) notebooks, such as `3.12`, set when **Create New Fabric Notebook** creates one (`jupyter_kernel_name` in the notebook's header, e.g. `python3.12`). Use a version Fabric's Python notebooks offer. Existing notebooks keep their version: change it in Fabric or in the notebook's header. PySpark notebooks use their Spark runtime's Python version, so this doesn't apply to them. The project's `src/fabric-supersat.yaml`, committed with the notebooks, overrides this (`notebooks.pythonVersion`), and is created with this setting's value."
+        },
+        "fabric-supersat.notebooks.upload.defaultLakehouse": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the default lakehouse at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the default lakehouse exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its default lakehouse (`default_lakehouse` and `default_lakehouse_workspace_id` in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. The project's `src/fabric-supersat.yaml`, committed with the notebooks, overrides this (`notebooks.upload.defaultLakehouse`), and is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.upload.otherLakehouses": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the other attached lakehouses at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the other attached lakehouses exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its other attached lakehouses (`known_lakehouses`; they are looked up in the default lakehouse's workspace in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. The project's `src/fabric-supersat.yaml`, committed with the notebooks, overrides this (`notebooks.upload.otherLakehouses`), and is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.upload.environment": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the environment at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the environment exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its environment (`environmentId` and `workspaceId` under `environment` in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. The project's `src/fabric-supersat.yaml`, committed with the notebooks, overrides this (`notebooks.upload.environment`), and is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
         }
+      }
+    },
+    "configurationDefaults": {
+      "notebook.globalToolbarShowLabel": "never",
+      "workbench.editorAssociations": {
+        "**/src/Notebooks/*/*.py": "fabric-supersat-notebook",
+        "**/*.Notebook/notebook-content.py": "fabric-supersat-notebook"
       }
     }
   },

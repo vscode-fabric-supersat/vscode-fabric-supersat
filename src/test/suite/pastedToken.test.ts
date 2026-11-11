@@ -93,7 +93,7 @@ suite('PastedTokenProvider', () => {
     await assert.rejects(provider.getToken('fabric', 'why'), AuthCancelledError);
   });
 
-  test('cannot provide ARM tokens, so Switch Tenant explains why', async () => {
+  test('cannot provide ARM tokens, so listing tenants explains why', async () => {
     const { provider } = setup([]);
     await assert.rejects(provider.getToken('arm', 'why'), AuthError);
   });

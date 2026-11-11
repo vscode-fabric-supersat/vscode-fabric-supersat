@@ -1,7 +1,10 @@
 // Desktop-only tests: the Azure CLI provider with a fake `az` (nothing is executed).
 import * as assert from 'assert';
 import { AuthError } from '../../auth/types';
-import { AzureCliTokenProvider, loginCommand, type ExecFn } from '../../node/azureCli';
+import { AzureCliTokenProvider, type ExecFn, findExecutable, loginCommand } from '../../node/azureCli';
+
+/** Where the fake `az` is "found" on PATH. */
+const AZ = '/opt/az/bin/az';
 import { fakeJwt, nowSeconds } from '../suite/jwtHelper';
 
 function fakeAz(results: (string | Error)[]) {
@@ -29,25 +32,25 @@ suite('AzureCliTokenProvider', () => {
   test('runs az for the Fabric resource and caches the token', async () => {
     const token = fakeJwt({ upn: 'ada@contoso.com' });
     const { exec, calls } = fakeAz([azOutput(token)]);
-    const provider = new AzureCliTokenProvider({ getTenant: () => '', exec });
+    const provider = new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec });
 
     assert.strictEqual(await provider.getToken('fabric'), token);
     assert.strictEqual(await provider.getToken('fabric'), token);
     assert.deepStrictEqual(calls, [
-      ['az', 'account', 'get-access-token', '--resource', 'https://api.fabric.microsoft.com', '--output', 'json'],
+      [AZ, 'account', 'get-access-token', '--resource', 'https://api.fabric.microsoft.com', '--output', 'json'],
     ]);
   });
 
   test('passes the tenant, and uses the ARM resource for tenant listing', async () => {
     const { exec, calls } = fakeAz([azOutput('t')]);
-    await new AzureCliTokenProvider({ getTenant: () => 'contoso.onmicrosoft.com', exec }).getToken('arm');
+    await new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => 'contoso.onmicrosoft.com', exec }).getToken('arm');
     assert.deepStrictEqual(calls[0].slice(-4), ['--output', 'json', '--tenant', 'contoso.onmicrosoft.com']);
     assert.strictEqual(calls[0][4], 'https://management.azure.com');
   });
 
   test('refreshes tokens that expire within five minutes', async () => {
     const { exec, calls } = fakeAz([azOutput('old', nowSeconds() + 120), azOutput('new')]);
-    const provider = new AzureCliTokenProvider({ getTenant: () => '', exec });
+    const provider = new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec });
     assert.strictEqual(await provider.getToken('fabric'), 'old');
     assert.strictEqual(await provider.getToken('fabric'), 'new');
     assert.strictEqual(calls.length, 2);
@@ -55,18 +58,18 @@ suite('AzureCliTokenProvider', () => {
 
   test('sign in reports the account from the token', async () => {
     const { exec } = fakeAz([azOutput(fakeJwt({ upn: 'ada@contoso.com' }))]);
-    assert.strictEqual(await new AzureCliTokenProvider({ getTenant: () => '', exec }).signIn(), 'ada@contoso.com');
+    assert.strictEqual(await new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec }).signIn(), 'ada@contoso.com');
   });
 
   test('rejects unsafe tenant values before running anything', async () => {
     const { exec, calls } = fakeAz([]);
-    await assert.rejects(new AzureCliTokenProvider({ getTenant: () => 'x & calc', exec }).getToken('fabric'), AuthError);
+    await assert.rejects(new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => 'x & calc', exec }).getToken('fabric'), AuthError);
     assert.strictEqual(calls.length, 0);
   });
 
   test('not installed: offers the install page', async () => {
     const { exec } = fakeAz([azError('', 'ENOENT')]);
-    await assert.rejects(new AzureCliTokenProvider({ getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
+    await assert.rejects(new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
       assert.match(err.message, /isn't installed/);
       assert.strictEqual(err.fix.link?.label, 'Install Azure CLI');
       return true;
@@ -75,7 +78,7 @@ suite('AzureCliTokenProvider', () => {
 
   test('not logged in: offers az login (with the tenant)', async () => {
     const { exec } = fakeAz([azError("ERROR: Please run 'az login' to setup account.")]);
-    await assert.rejects(new AzureCliTokenProvider({ getTenant: () => 'tid', exec }).getToken('fabric'), (err: AuthError) => {
+    await assert.rejects(new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => 'tid', exec }).getToken('fabric'), (err: AuthError) => {
       assert.match(err.message, /Please run 'az login'/);
       assert.strictEqual(err.fix.terminalCommand, 'az login --tenant tid --allow-no-subscriptions');
       return true;
@@ -86,13 +89,13 @@ suite('AzureCliTokenProvider', () => {
     const stderr = [
       'ERROR: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.',
       'Run the command below to authenticate interactively; additional arguments may be added as needed:',
-      'az login --tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" --scope "https://api.fabric.microsoft.com/.default"',
+      'az login --tenant "00000000-0000-0000-0000-000000000001" --scope "https://api.fabric.microsoft.com/.default"',
     ].join('\n');
     const { exec } = fakeAz([azError(stderr)]);
-    await assert.rejects(new AzureCliTokenProvider({ getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
+    await assert.rejects(new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
       assert.strictEqual(
         err.fix.terminalCommand,
-        'az login --tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" --scope "https://api.fabric.microsoft.com/.default" --allow-no-subscriptions',
+        'az login --tenant "00000000-0000-0000-0000-000000000001" --scope "https://api.fabric.microsoft.com/.default" --allow-no-subscriptions',
       );
       return true;
     });
@@ -100,7 +103,7 @@ suite('AzureCliTokenProvider', () => {
 
   test('ignores suggested commands with shell metacharacters', async () => {
     const { exec } = fakeAz([azError("ERROR: run 'az login'\naz login; rm -rf ~")]);
-    await assert.rejects(new AzureCliTokenProvider({ getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
+    await assert.rejects(new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => '', exec }).getToken('fabric'), (err: AuthError) => {
       assert.strictEqual(err.fix.terminalCommand, 'az login --allow-no-subscriptions');
       return true;
     });
@@ -108,7 +111,7 @@ suite('AzureCliTokenProvider', () => {
 
   test('remote / browser-based hosts get --use-device-code', async () => {
     const { exec } = fakeAz([azError("ERROR: Please run 'az login' to setup account.")]);
-    const provider = new AzureCliTokenProvider({ getTenant: () => 'tid', exec, preferDeviceCode: true });
+    const provider = new AzureCliTokenProvider({ findAz: () => AZ, getTenant: () => 'tid', exec, preferDeviceCode: true });
     await assert.rejects(provider.getToken('fabric'), (err: AuthError) => {
       assert.strictEqual(err.fix.terminalCommand, 'az login --tenant tid --use-device-code --allow-no-subscriptions');
       return true;
@@ -126,5 +129,54 @@ suite('loginCommand', () => {
 
   test('local desktop: browser sign-in, still allowing no subscriptions', () => {
     assert.strictEqual(loginCommand(undefined, '', false), 'az login --allow-no-subscriptions');
+  });
+});
+
+suite('Finding the Azure CLI on PATH', () => {
+  const files = (...present: string[]) => (file: string) => present.includes(file);
+
+  test('runs az by its full path; not found means "not installed", and nothing is run', async () => {
+    const calls: string[] = [];
+    const exec: ExecFn = async (file) => {
+      calls.push(file);
+      return { stdout: '', stderr: '' };
+    };
+    await assert.rejects(
+      new AzureCliTokenProvider({ findAz: () => undefined, getTenant: () => '', exec }).getToken('fabric'),
+      (err: AuthError) => {
+        assert.match(err.message, /isn't installed/);
+        assert.strictEqual(err.fix.link?.label, 'Install Azure CLI');
+        return true;
+      },
+    );
+    assert.deepStrictEqual(calls, []);
+  });
+
+  test('Windows: the first PATH folder with az plus a PATHEXT extension, never the current folder', () => {
+    const options = { platform: 'win32' as const, pathExt: '.COM;.EXE;.BAT;.CMD' };
+    assert.strictEqual(
+      findExecutable('az', {
+        ...options,
+        path: 'C:\\Windows;"C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin";C:\\Other',
+        isExecutable: files('C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\az.cmd', 'C:\\Other\\az.cmd'),
+      }),
+      'C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\az.cmd',
+    );
+    // Relative and empty entries (the current folder, e.g. an untrusted repo) are skipped.
+    assert.strictEqual(
+      findExecutable('az', { ...options, path: '.;;repo\\tools', isExecutable: files('.\\az.cmd', 'az.cmd', 'repo\\tools\\az.cmd') }),
+      undefined,
+    );
+    // A bare name without an extension isn't run on Windows.
+    assert.strictEqual(findExecutable('az', { ...options, path: 'C:\\bin', isExecutable: files('C:\\bin\\az') }), undefined);
+  });
+
+  test('macOS and Linux: the first absolute PATH folder with an executable az', () => {
+    assert.strictEqual(
+      findExecutable('az', { platform: 'linux', path: '/usr/local/bin:/usr/bin:/opt/az/bin', isExecutable: files('/usr/bin/az', '/opt/az/bin/az') }),
+      '/usr/bin/az',
+    );
+    assert.strictEqual(findExecutable('az', { platform: 'darwin', path: '.:bin::', isExecutable: () => true }), undefined);
+    assert.strictEqual(findExecutable('az', { platform: 'linux', path: '', isExecutable: () => true }), undefined);
   });
 });

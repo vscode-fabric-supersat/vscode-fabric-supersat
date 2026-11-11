@@ -3,11 +3,17 @@ import * as vscode from 'vscode';
 /**
  * Minimal in-memory file system for tests that read and write files. Works in both the
  * desktop and web test hosts, which have no writable folder open. Register it under a
- * unique scheme with `vscode.workspace.registerFileSystemProvider`.
+ * unique scheme with `vscode.workspace.registerFileSystemProvider`. Like a disk, it reports
+ * changes (`onDidChangeFile`), so file system watchers on it see writes and deletes.
  */
 export class MemFs implements vscode.FileSystemProvider {
   private readonly files = new Map<string, Uint8Array>();
+  private readonly mtimes = new Map<string, number>();
+  /** Modified times increase with every write, so tests can rely on their order. */
+  private clock = 0;
   private readonly dirs = new Set<string>(['/']);
+  /** Paths reported as symbolic links (see `markSymlink`). */
+  private readonly links = new Set<string>();
   private readonly emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.emitter.event;
 
@@ -16,17 +22,22 @@ export class MemFs implements vscode.FileSystemProvider {
   }
 
   stat(uri: vscode.Uri): vscode.FileStat {
+    const link = this.links.has(uri.path) ? vscode.FileType.SymbolicLink : 0;
     const file = this.files.get(uri.path);
     if (file) {
-      return { type: vscode.FileType.File, ctime: 0, mtime: Date.now(), size: file.byteLength };
+      return { type: vscode.FileType.File | link, ctime: 0, mtime: this.mtimes.get(uri.path) ?? 0, size: file.byteLength };
     }
     if (this.dirs.has(uri.path)) {
-      return { type: vscode.FileType.Directory, ctime: 0, mtime: 0, size: 0 };
+      return { type: vscode.FileType.Directory | link, ctime: 0, mtime: 0, size: 0 };
     }
     throw vscode.FileSystemError.FileNotFound(uri);
   }
 
   readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
+    // As real file systems do, a folder that doesn't exist is an error, not an empty list.
+    if (!this.dirs.has(uri.path) && uri.path !== '/') {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
     const prefix = uri.path.endsWith('/') ? uri.path : `${uri.path}/`;
     const children = (paths: Iterable<string>, type: vscode.FileType) =>
       [...paths]
@@ -55,18 +66,35 @@ export class MemFs implements vscode.FileSystemProvider {
     if (!this.dirs.has(parent)) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
+    const type = this.files.has(uri.path) ? vscode.FileChangeType.Changed : vscode.FileChangeType.Created;
     this.files.set(uri.path, content);
+    this.mtimes.set(uri.path, ++this.clock);
+    this.emitter.fire([{ type, uri }]);
   }
 
-  delete(uri: vscode.Uri): void {
+  delete(uri: vscode.Uri, options: { readonly recursive: boolean } = { recursive: false }): void {
+    // A folder's contents go with it, as on a real file system (VS Code asks for a recursive delete).
+    const prefix = `${uri.path}/`;
+    const contents = [...this.files.keys(), ...this.dirs].filter((p) => p.startsWith(prefix));
+    if (contents.length && !options.recursive) {
+      throw vscode.FileSystemError.NoPermissions(`${uri.path} isn't empty`);
+    }
     if (!this.files.delete(uri.path) && !this.dirs.delete(uri.path)) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
+    contents.forEach((p) => this.files.delete(p) || this.dirs.delete(p));
+    this.emitter.fire([{ type: vscode.FileChangeType.Deleted, uri }]);
   }
 
   rename(oldUri: vscode.Uri, newUri: vscode.Uri): void {
     this.writeFile(newUri, this.readFile(oldUri));
     this.files.delete(oldUri.path);
+    this.emitter.fire([{ type: vscode.FileChangeType.Deleted, uri: oldUri }]);
+  }
+
+  /** Test helper: reports an existing file or folder as a symbolic link, as a disk would. */
+  markSymlink(path: string): void {
+    this.links.add(path);
   }
 
   /** Test helper: the file's text, or `undefined` if it doesn't exist. */

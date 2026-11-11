@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat/schemas/environment.schema.json",
+  "title": "Fabric Supersat environment properties",
+  "description": "src/Environments/<Name>/<Name>.yaml: properties of the Fabric environment in this folder. The environment's name is its folder name.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "description": "The environment's description in Fabric. Upload sets it; \"\" clears it. Without it, upload leaves the description in Fabric as it is.",
+      "type": "string",
+      "maxLength": 256
+    },
+    "folder": {
+      "description": "The workspace folder the environment is in, as a path of folder names such as \"Shared\", matched by name in each workspace. Upload creates any missing folders and moves the environment there; \"\" is the workspace root. Without it, upload leaves the environment where it is in Fabric (new environments go in the root). Folder names can't contain ~ \" # . & * : < > ? { | } or start or end with a space; at most 10 levels.",
+      "type": "string",
+      "pattern": "^[^~\"#.&*:<>?{|}\\u0000-\\u001f]*$"
+    }
+  }
+}

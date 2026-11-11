@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vscode-fabric-supersat/vscode-fabric-supersat/schemas/notebook-settings.schema.json",
+  "title": "Fabric Supersat notebook settings",
+  "description": "Notebook settings in src/fabric-supersat.yaml. Commit this file with your notebooks: everyone using the project uploads with these settings, in every mode, Restricted Mode included.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "notebooks": {
+      "description": "Notebook settings: the Python version of new Python notebooks, and lakehouse and environment references. These override the VS Code settings of the same names (fabric-supersat.notebooks.*); they are written with the current VS Code settings when this file is created (the first time notebooks are downloaded, created or uploaded), and a value removed from here uses the VS Code setting.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pythonVersion": {
+          "description": "Python version of new Python (non-Spark) notebooks, such as \"3.12\", set when Create New Fabric Notebook creates one (jupyter_kernel_name, e.g. python3.12). Keep the quotes: unquoted, 3.10 is read as 3.1. Existing notebooks keep their version. PySpark notebooks use their Spark runtime's Python version.",
+          "type": "string",
+          "pattern": "^\\s*3\\.\\d{1,2}\\s*$"
+        },
+        "upload": {
+          "description": "What uploading does with each kind of reference.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultLakehouse": {
+              "description": "On upload: \"replace\" points the default lakehouse at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "otherLakehouses": {
+              "description": "On upload: \"replace\" points the other attached lakehouses (looked up in the default lakehouse's workspace) at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "environment": {
+              "description": "On upload: \"replace\" points the environment at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

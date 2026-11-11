@@ -10,6 +10,13 @@ suite('Extension', () => {
     await ext.activate();
   });
 
+  test('the notebook reference settings apply in Restricted Mode, like src/fabric-supersat.yaml', () => {
+    const json = vscode.extensions.getExtension(EXTENSION_FULL_ID)!.packageJSON as {
+      capabilities: { untrustedWorkspaces: { restrictedConfigurations?: string[] } };
+    };
+    assert.deepStrictEqual(json.capabilities.untrustedWorkspaces.restrictedConfigurations ?? [], []);
+  });
+
   test('registers its commands', async () => {
     const all = await vscode.commands.getCommands(true);
     for (const id of Object.values(Commands)) {
