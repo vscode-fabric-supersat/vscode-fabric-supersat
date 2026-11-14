@@ -16,4 +16,7 @@ export const Commands = {
   uploadAllNotebooks: `${ID_PREFIX}.uploadAllNotebooks`,
   uploadNotebook: `${ID_PREFIX}.uploadNotebook`,
   newNotebook: `${ID_PREFIX}.newNotebook`,
+  downloadWorkspaceMetadata: `${ID_PREFIX}.downloadWorkspaceMetadata`,
+  testNotebookFormats: `${ID_PREFIX}.testNotebookFormats`,
+  compareWithWorkspace: `${ID_PREFIX}.compareWithWorkspace`,
 } as const;

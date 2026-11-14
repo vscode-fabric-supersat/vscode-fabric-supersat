@@ -16,6 +16,56 @@
           "type": "string"
         }
       }
+    },
+    "notebooks": {
+      "description": "Notebook lakehouse and environment references. These override the VS Code settings of the same names (fabric-supersat.notebooks.*); they are written with the current VS Code settings when this file is created, and a value removed from here uses the VS Code setting.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upload": {
+          "description": "What uploading does with each kind of reference.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultLakehouse": {
+              "description": "On upload: \"replace\" points the default lakehouse at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "otherLakehouses": {
+              "description": "On upload: \"replace\" points the other attached lakehouses (looked up in the default lakehouse's workspace) at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            },
+            "environment": {
+              "description": "On upload: \"replace\" points the environment at the item with the same name in the workspace you upload to, writing the new ID to the notebook's local files first (warns if there is none); \"keep\" uploads it as it is.",
+              "enum": [
+                "replace",
+                "keep"
+              ]
+            }
+          }
+        },
+        "sameWorkspace": {
+          "description": "Which references to save as \"same workspace\". Other lakehouses have no workspace field.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultLakehouse": {
+              "description": "true saves the default lakehouse's workspace as \"same workspace\" (all zeros) where it is the notebook's own: in downloaded notebooks, and when upload writes new IDs to the local files.",
+              "type": "boolean"
+            },
+            "environment": {
+              "description": "true saves the environment's workspace as \"same workspace\" (all zeros) where it is the notebook's own: in downloaded notebooks, and when upload writes new IDs to the local files.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
   }
 }

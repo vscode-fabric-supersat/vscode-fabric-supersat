@@ -12,28 +12,40 @@ This Visual Studio Code extension runs in **VS Code Desktop** and **VS Code for 
 
 | Command | Description |
 | --- | --- |
+| `Fabric Supersat: Compare with Workspace` | Lists which notebooks differ between `src/Notebooks` and the current workspace (different, only in Fabric, only local, same), and opens a diff of the one you pick, Fabric on the left. Changes nothing. See [Comparing with a workspace](#comparing-with-a-workspace). |
 | `Fabric Supersat: Configure Sign-In` | Shows and changes the sign-in method, app registration client ID and tenant. **Tenant** lists your Microsoft Entra tenants to pick from (Azure CLI and VS Code methods), or lets you type a tenant ID or domain, or clear it to use your default tenant. See [Signing in to Fabric](#signing-in-to-fabric). |
 | `Fabric Supersat: Create New Fabric Notebook` | Asks for the notebook type (PySpark or Python) and a name, and creates `src/Notebooks/<Name>/<Name>.py` (and its `.ipynb`) with one empty Python cell, then opens it. Upload it with **Save and Upload Notebook**. |
-| `Fabric Supersat: Download All Notebooks` | Downloads every notebook in the current workspace. If some already have local copies, asks once whether to replace or skip them. Notebooks that can't be downloaded (e.g. Spark SQL) are skipped; the summary links to the reasons in the log. Cancellable. |
+| `Fabric Supersat: Download All Notebooks` | Downloads every notebook in the current workspace. If some already have local copies, asks once whether to replace or skip them. Notebooks that can't be downloaded (e.g. Spark SQL or T-SQL notebooks) are skipped; the summary links to the reasons in the log. Cancellable. Works on several notebooks at once. |
 | `Fabric Supersat: Download Notebook` | Browse the notebooks in the current workspace and download the one you pick (see [Notebooks](#notebooks)). Asks for a workspace if none is selected, and signs you in first if needed. |
+| `Fabric Supersat: Download Workspace Metadata` | Saves everything readable about the current workspace (item counts, folders, notebooks and their lakehouses, lakehouse and warehouse connection strings, member roles…) in `.fabric-supersat/workspaces/<Workspace Name>/metadata.md` and `metadata.json`, and opens it. See [Workspace metadata](#workspace-metadata). |
 | `Fabric Supersat: Open Settings` | Opens the Settings editor filtered to this extension's settings. |
 | `Fabric Supersat: Save and Upload Notebook` | Saves the open notebook and uploads it to the current workspace, replacing the notebook with the same name or creating it. Also a button in the notebook toolbar. |
 | `Fabric Supersat: Select Workspace` | Lists your Fabric workspaces and saves the one you pick as the current workspace (see [Current Workspace](#current-workspace)). Also available by clicking the workspace in the status bar, which shows from startup. |
 | `Fabric Supersat: Show Log` | Opens the extension's log in the Output panel. |
 | `Fabric Supersat: Sign In to Fabric` | Signs in with the configured method (see below) and shows the account. |
 | `Fabric Supersat: Sign Out of Fabric` | Forgets a pasted token, or tells you how to sign out for the other methods. |
-| `Fabric Supersat: Upload All Notebooks` | Saves any open notebooks, then uploads every notebook in `src/Notebooks` to the current workspace. Asks once, listing which notebooks it will overwrite and create, and which it skips (e.g. not a Fabric notebook). Cancellable. |
+| `Fabric Supersat: Test Notebook Formats` | Downloads both Fabric exports of every notebook in the current workspace and checks the extension's format conversions against them, without changing `src/`. Report in `.fabric-supersat/diagnostics/format-test.md`. See [Testing notebook formats](#testing-notebook-formats). |
+| `Fabric Supersat: Upload All Notebooks` | Saves any open notebooks, then uploads every notebook in `src/Notebooks` to the current workspace. Asks once, listing which notebooks it will overwrite and create, and which it skips (e.g. not a Fabric notebook). Cancellable. Offers **Upload Changed** for only the notebooks changed locally since they were last downloaded from or uploaded to that workspace. Works on several notebooks at once. |
 
 ## Current Workspace
 
 Commands that work in a Fabric workspace use the current workspace. Pick it with **Fabric Supersat: Select Workspace** or the status bar item. If none is selected, the first command that needs one asks you to pick it and remembers your choice.
 
-Only the workspace's **name** is saved, never its ID. Where it's saved:
+Only the workspace's **name** is saved, never its ID. Where it's read from:
 
-| Situation | Saved in |
+| Situation | Read from |
 | --- | --- |
 | A folder is open | `.fabric-supersat/settings.yaml` in that folder (the first folder of a multi-root workspace). |
 | No folder open, the folder is read-only (some virtual workspaces), or the folder isn't trusted ([Restricted Mode](#restricted-mode)) | User setting `fabric-supersat.workspace.name`. |
+
+The file and the user setting are kept in sync, however you change the workspace:
+
+- **Select Workspace** saves the name in both.
+- **Editing `settings.yaml`** copies the name to the user setting when you save the file.
+- **Changing the user setting** copies it into `settings.yaml`, if the folder has one. A project without the file still starts with no workspace selected.
+- **Opening a folder** copies the workspace named in its `settings.yaml` to the user setting. A folder with no workspace named leaves the setting alone.
+
+The user setting is shared by all your VS Code windows. So changes, whether from the command, the file or the setting, are synced only in the window you made them in (the one with focus). Other open projects keep their own workspace. Deleting `settings.yaml` (for example with `git clean`) doesn't clear the user setting.
 
 The first time a command needs the workspace in a session, the extension lists your workspaces in Fabric and finds the one with that name (ignoring case, as Fabric does). The ID is cached until VS Code restarts, or until you sign in again, sign out, or change the sign-in method, client ID or tenant. So the name you see is always the workspace you work in. The command stops, with a **Select Workspace** button, if:
 
@@ -44,20 +56,38 @@ When several workspaces share a name, **Select Workspace** lists each of them wi
 
 The `.fabric-supersat` folder is local to you and is never committed: the extension puts a `.gitignore` containing `*` inside it, so git ignores the whole folder without any change to your project's own `.gitignore`. Each person working on the project picks their own workspace (for example their own dev workspace).
 
-Only one of the two is used at a time: while a folder is open, the user settings are ignored, so a new project starts with no workspace selected and asks for one.
+The extension **always asks before creating** the `.fabric-supersat` folder. It's created when something first needs it: selecting a workspace, downloading or uploading notebooks, or making a notebook's `.ipynb` copy (for example, at startup in a fresh clone). If you say no, nothing is written. Commands ask again the next time they need the folder. Automatic updates (at startup, or when a `.py` changes on disk) don't ask again until VS Code restarts.
 
-`settings.yaml` is meant to be read and edited by hand. Your comments and layout are kept when the extension updates it, and the status bar updates when you save it:
+`settings.yaml` is meant to be read and edited by hand. Your comments and layout are kept when the extension updates it, and the status bar (and the user setting) update when you save it:
 
 ```yaml
 # Fabric Supersat settings for this project.
 # They are yours only: this folder is ignored by git. Edit them here or with
 # Fabric Supersat commands; your comments and layout are kept.
 
-# Fabric workspace that commands work in.
+# Name of the Fabric workspace that commands work in.
 # Change it with "Fabric Supersat: Select Workspace".
 workspace:
   name: "Sales (dev)"
+
+# Notebook lakehouse and environment references. These override the VS Code settings
+# of the same names (fabric-supersat.notebooks.*), which supplied the values below
+# when this file was created. A setting removed from here uses the VS Code setting.
+notebooks:
+  # On upload: "replace" points each reference at the item with the same name in the
+  # workspace you upload to (writing the new ID to the local files); "keep" leaves it.
+  upload:
+    defaultLakehouse: "replace"
+    otherLakehouses: "replace"
+    environment: "replace"
+  # true saves the workspace as "same workspace" (all zeros) where it is the notebook's
+  # own: in downloaded notebooks, and when upload writes new IDs to the local files.
+  sameWorkspace:
+    defaultLakehouse: false
+    environment: false
 ```
+
+The `notebooks` values are explained in [Lakehouses and environments in other workspaces](#lakehouses-and-environments-in-other-workspaces). As soon as the extension creates the `.fabric-supersat` folder, it writes `settings.yaml` with the `notebooks` values in effect: your current VS Code settings, defaults included. **Select Workspace** creates the file the same way if the folder exists but the file doesn't, and adds any `notebooks` values missing from an existing file. Otherwise the extension never changes these values; edit them in the file. Values in the file override the VS Code settings, and a value you remove from the file falls back to the VS Code setting. An invalid value (for example `environment: swap`) stops the command with an error naming the setting, and the file is left alone.
 
 An `id` left in the file by an earlier version is ignored, and removed the next time the extension saves the file.
 
@@ -67,16 +97,16 @@ Changing the tenant in **Configure Sign-In** clears the saved workspace (blankin
 
 ## Notebooks
 
-Notebooks are kept as files in your project and identified by **name**, no Fabric item ID (GUID) is stored. Importantly, this means that notebooks are not tied to a GUID that Fabric owns and changes, notebooks are easily uploaded and deployed to other workspaces (e.g. Test and Prod), and that **save/upload will overwrite** any notebook of the same name in the currently selected workspace. For convenience, the folder name is also the notebook's name.
+Notebooks are kept as files in your project and identified by **name**, no Fabric item ID (GUID) is stored. Importantly, this means that notebooks are not tied to a GUID that Fabric owns and changes, notebooks are easily uploaded and deployed to other workspaces (e.g. Test and Prod, with their lakehouse and environment matched by name, see [Uploading to other workspaces](#lakehouses-and-environments-in-other-workspaces)), and that **save/upload will overwrite** any notebook of the same name in the currently selected workspace. For convenience, the folder name is also the notebook's name.
 
 Downloading a notebook (**Download Notebook**, then pick one, or **Download All Notebooks**) writes two files:
 
 | File | Format | Purpose |
 | --- | --- | --- |
 | `src/Notebooks/<Name>/<Name>.py` | Fabric's Git format: plain Python with `# CELL` markers, the same content Fabric's own Git integration writes (as `notebook-content.py`). | The source to commit. This is what gets uploaded. |
-| `.fabric-supersat/Notebooks/<Name>/<Name>.ipynb` | Jupyter, including cell outputs. | Your local working copy. Ignored by git. |
+| `.fabric-supersat/Notebooks/<Name>/<Name>.ipynb` | Jupyter, generated from the `.py`. Holds the outputs of cells you run locally. | Your local working copy. Ignored by git. |
 
-Both come straight from Fabric. If you already have a local copy, you're asked before it is replaced. The `.ipynb` then opens.
+Each notebook takes one request to Fabric: its Git-format `.py`, saved exactly as Fabric exports it. The `.ipynb` is generated from it, so **cell outputs from Fabric aren't downloaded**. When you download a notebook again, your local `.ipynb` keeps the outputs of cells whose code hasn't changed, as saving the `.py` does. **Test Notebook Formats** checks the conversion against Fabric's own `.ipynb` for every notebook in a workspace (see [Testing notebook formats](#testing-notebook-formats)). If you already have a local copy, you're asked before it is replaced. The `.ipynb` then opens.
 
 > **Recommended:** Microsoft's [Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) (`ms-toolsai.jupyter`). VS Code can open and edit notebooks without it, but you need it to run cells locally against a Python kernel.
 
@@ -111,9 +141,20 @@ This is the extension's own file, not Fabric Git integration's `.platform`. That
 
 ### Supported notebooks
 
-PySpark and Python notebooks.
+A Fabric notebook has a **notebook language**, which decides where its code runs, and each cell can also have its own **cell language**. "SQL" can mean two different things here:
 
-Fabric stores Spark SQL, Scala and SparkR notebooks in other files (`notebook-content.sql`, `.scala`, `.r`), and downloading one explains that it isn't supported yet.
+- **Spark SQL** runs on a Spark cluster, against lakehouse tables.
+- **T-SQL** runs on a warehouse or SQL analytics endpoint.
+
+| Notebook language | Supported | SQL cells inside it |
+| --- | --- | --- |
+| **PySpark** (Python on Spark) | Yes | Spark SQL cells (`%%sql`) are supported. |
+| **Python** (Python without Spark) | Yes | T-SQL cells (`%%tsql`) are supported. |
+| **Spark SQL** | Not yet | Fabric stores it as `notebook-content.sql`. |
+| **T-SQL** | Not yet | Recognised by its `sqldatawarehouse` kernel. Its attached warehouses and SQL analytics endpoints are stored under `dependencies.warehouse`. |
+| **Scala**, **SparkR** | Not yet | Fabric stores them as `notebook-content.scala` and `.r`. |
+
+Downloading a notebook that isn't supported yet says which kind it is, and is skipped by **Download All Notebooks**. If you only need some SQL, use SQL cells in a PySpark or Python notebook instead.
 
 **Built-in resources aren't supported.** Files in a notebook's Built-in resources folder in Fabric (for example `helper.py`) aren't downloaded or uploaded, and the extension has no local equivalent, because Fabric's public API doesn't include them ([Microsoft: Notebooks Resources Folder Support in Git](https://learn.microsoft.com/fabric/data-engineering/notebook-source-control-deployment#notebooks-resources-folder-support-in-git)). Microsoft's own deployment tool, fabric-cicd, has the same limitation: Fabric silently ignores resource files sent to its API, so a deployed notebook can fail on its first `import` of a resource ([fabric-cicd issue #1095](https://github.com/microsoft/fabric-cicd/issues/1095), labelled a known product issue). Uploading sends only the notebook's cells and metadata; Microsoft doesn't document whether that leaves a notebook's existing Built-in resources untouched. Instead of Built-in resources, share code as described below.
 
@@ -124,9 +165,83 @@ Keep shared code in Fabric items that the extension (or Fabric's own tools) can 
 | Notebook language | Share code with | How |
 | --- | --- | --- |
 | **Python** | Another notebook, loaded with `%run` | Put the shared functions in their own Python notebook (for example `Common`, created with **Create New Fabric Notebook** → **Python**) and upload it to the same workspace. In each notebook that uses it, run `%run Common` (in its own cell, near the top); its functions and variables are then available. `%run` loads notebooks in the same workspace only, and can't load `.py` files ([Microsoft: Python experience on notebook](https://learn.microsoft.com/fabric/data-engineering/using-python-experience-on-notebook)). |
-| **PySpark** | An Environment | Package the shared code as a Python library (`.whl`, or a single `.py`) and add it to a Fabric Environment's custom libraries, then attach the Environment to the notebook ([Microsoft: Library management in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library)). The notebook can then `import` it. The attachment is stored in the notebook's metadata (`dependencies.environment`), which download and upload keep. The extension doesn't manage Environments (yet); use the Fabric portal. |
+| **PySpark** | An Environment | Package the shared code as a Python library (`.whl`, or a single `.py`) and add it to a Fabric Environment's custom libraries, then attach the Environment to the notebook ([Microsoft: Library management in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library)). The notebook can then `import` it. The attachment is stored in the notebook's metadata (`dependencies.environment`), which download keeps and upload points at the target workspace's environment of the same name (see [Uploading to other workspaces](#lakehouses-and-environments-in-other-workspaces)). The extension doesn't manage Environments (yet); use the Fabric portal. |
 
 Notebook names must also work as folder names: names containing `\ / : * ? " < > |`, or starting or ending with a space, or ending with a dot, are refused rather than changed (a changed name wouldn't match on upload). Rename the notebook in Fabric first.
+
+### Lakehouses and environments in other workspaces
+
+A notebook's header (the `# META` block at the top of the `.py`) refers to its **default lakehouse**, any **other lakehouses** attached to it, and its **environment** by ID. The default lakehouse and the environment also name the workspace they are in: by ID, or as **"same workspace"** (`00000000-0000-0000-0000-000000000000`), meaning the notebook's own workspace, which is how Fabric's Git integration writes them. Uploaded unchanged to another workspace, for example from Dev to Test, a notebook would still use Dev's lakehouse.
+
+**On upload**, by default each reference is pointed at the item with the **same name** (ignoring case) in the workspace you upload to, much as Microsoft's [fabric-cicd](https://microsoft.github.io/fabric-cicd/) does when deploying:
+
+- **The new IDs are written to your local files first** (the `.py` and its `.ipynb`), then uploaded, so what's in Fabric is what's on disk. Source control shows the change: commit it, or discard it to go back.
+- **Items already in the target workspace are left as they are**, so uploading to the notebook's own workspace changes nothing.
+- **If the target workspace has no item with that name**, the reference is kept and you get a warning. The log (**Show Log**) lists each reference kept and why, and every ID changed.
+- **"Same workspace" always stays "same workspace"**, and is never warned about. If such an item isn't in the target workspace, a default lakehouse is still matched by name (the header stores its name). An environment can't be, since only its ID is stored. In that case it's kept, and this is only logged.
+- **Other lakehouses** have no workspace in the header. They are looked up in the default lakehouse's workspace.
+- **Code cells are never changed.** IDs, paths or connection strings written in code (for example `abfss://` paths) aren't touched.
+
+**Settings**: one per kind of reference. They are set in `.fabric-supersat/settings.yaml` under `notebooks` (see [Current Workspace](#current-workspace)), which overrides the VS Code settings of the same names below. The VS Code settings supply the values the file is created with, and apply on their own when no folder is open, the folder is read-only, or it isn't trusted:
+
+| Setting | Values | Does |
+| --- | --- | --- |
+| `fabric-supersat.notebooks.upload.defaultLakehouse` | `replace` (default), `keep` | On upload, points the default lakehouse at the target workspace's lakehouse of the same name, or leaves it as it is. |
+| `fabric-supersat.notebooks.upload.otherLakehouses` | `replace` (default), `keep` | The same for the other attached lakehouses. |
+| `fabric-supersat.notebooks.upload.environment` | `replace` (default), `keep` | The same for the environment. |
+| `fabric-supersat.notebooks.sameWorkspace.defaultLakehouse` | `false` (default), `true` | Saves the default lakehouse's workspace as "same workspace" when it is the notebook's own workspace: in downloaded notebooks, and when upload writes new IDs to the files. |
+| `fabric-supersat.notebooks.sameWorkspace.environment` | `false` (default), `true` | The same for the environment. |
+
+With the `sameWorkspace` settings on, your files name no workspace, only lakehouse and environment IDs. Other lakehouses have no `sameWorkspace` setting, because the header has no workspace field for them. New notebooks start without a lakehouse or environment, so they have nothing to save.
+
+## Workspace metadata
+
+**Download Workspace Metadata** saves what Fabric reports about the current workspace in `.fabric-supersat/workspaces/<Workspace Name>/` (one folder per workspace, so Dev, Test and Prod sit side by side):
+
+- `metadata.md` is easy to read, and opens when the command finishes. It starts with summaries: item types and their counts, notebooks by language, and how notebooks compare with `src/Notebooks`. Then come the workspace and its Git connection, the folder tree, and one section per item type. That includes each notebook's language, default lakehouse and environment, each lakehouse's SQL connection string, OneLake paths and tables, and each warehouse's connection string. Next are member roles and Spark settings. Finally, copyable lists: names of each item type one per line, and every item as CSV.
+- `metadata.json` holds the same data, for copying or for other tools.
+
+**Notebook details**, ticked by default in the command's options, fetches each notebook's content to fill in its language, references and comparison. It's slower on workspaces with many notebooks. **Member roles** (names and email addresses) are included unless you turn off `fabric-supersat.metadata.includeMemberRoles`. Anything Fabric won't show you, for example member roles without a role that can see them, is listed under **Not available** at the end, and the rest is still saved.
+
+The files are for reading only: no command acts on an ID read from them. Run the command again to refresh them.
+
+## Testing notebook formats
+
+**Test Notebook Formats** checks that the extension handles every notebook in the current workspace exactly as Fabric exports it. For each notebook it downloads both Fabric exports (the Git-format `notebook-content.py` and the `.ipynb`), and checks, without changing anything in `src/`:
+
+1. Reading and rewriting Fabric's `.py` gives back exactly the same text.
+2. The `.py` generated from Fabric's `.ipynb` is identical to Fabric's `.py`.
+3. The `.ipynb` generated from Fabric's `.py` (what download writes; here keeping Fabric's outputs, as a local `.ipynb`'s outputs are kept) matches Fabric's `.ipynb`.
+4. Both exports agree on whether the notebook is supported (for example, T-SQL). Download decides from the `.py`.
+5. Uploading it back to its own workspace leaves its lakehouse and environment IDs alone. A warning here usually means it refers to items in another workspace.
+
+The report is `.fabric-supersat/diagnostics/format-test.md`, with the results also in `format-test.json`. It has a table of every notebook's checks and the first difference for each failure. Both exports of each failing notebook are saved in `.fabric-supersat/diagnostics/samples/<Notebook>/`, with every ID replaced by a numbered placeholder (the same ID gets the same placeholder in both files), ready to share as an example. **Review samples before sharing**: names, code and cell outputs are kept as they are.
+
+## Comparing with a workspace
+
+**Compare with Workspace** fetches every notebook in the current workspace and compares it with `src/Notebooks`. It fetches each notebook's `.py`, as download does. A notebook counts as the same when downloading it would write exactly your file, with your `sameWorkspace` settings applied. The list shows each notebook as **different**, **only in Fabric**, **only local**, **not supported** or **same**, with differences first, and stays open while you look through it. Pick a notebook to open it:
+
+- **Different** or **same** opens a diff: Fabric's version on the left (read-only), your `src/` file on the right.
+- **Only in Fabric** opens Fabric's version, read-only.
+- **Only local** opens your file.
+
+It changes nothing. To bring a notebook across, use **Download Notebook** or **Save and Upload Notebook**.
+
+## Speed and diagnostics
+
+Most of the time spent downloading and uploading is waiting for Fabric to finish each request. So bulk commands (**Download All Notebooks**, **Upload All Notebooks**, **Download Workspace Metadata**, **Test Notebook Formats**, **Compare with Workspace**) work on several notebooks at once: 4 by default, set with `fabric-supersat.fabric.maxConcurrentRequests` (1 to 16). If Fabric throttles requests (HTTP 429), they're retried after the wait Fabric asks for.
+
+**Upload All Notebooks** remembers what was last downloaded from or uploaded to each workspace, in `.fabric-supersat/workspaces/<Workspace Name>/sync-state.json` (a hash of each notebook's `.py`). If only some notebooks changed locally since, it offers **Upload Changed** next to **Upload All**. Upload Changed can't see changes made in Fabric since; Upload All overwrites them.
+
+While `fabric-supersat.diagnostics.logToFiles` is on (the default), the extension keeps these files in `.fabric-supersat` (git-ignored, each capped in size, with one older copy kept as `<name>.1`):
+
+| File | Contents |
+| --- | --- |
+| `diagnostics/requests.jsonl` | One line per Fabric request: time, command, method, address, status, duration, retries and the wait Fabric asked for. One line per long-running operation: how many times it was polled and how long was spent waiting. Never tokens or notebook contents. |
+| `logs/fabric-supersat.log` | A copy of the Output channel (**Show Log**), readable after VS Code closes. |
+| `history.jsonl` | Each notebook download and upload: notebook, workspace, time, result, and the lakehouse and environment IDs changed. |
+
+Each command that talks to Fabric also logs a summary, for example: `Download All Notebooks: 74 requests, 37 long-running operations, 6m12s, of which 4m50s waiting on Fabric`. Waiting time is summed over requests running at once, so it can exceed the command's duration. These files are only written once `.fabric-supersat` exists; logging never creates it.
 
 ## Restricted Mode
 

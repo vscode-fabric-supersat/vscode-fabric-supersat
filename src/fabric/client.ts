@@ -5,6 +5,8 @@
  * as inputs, so it runs unchanged on desktop and web and can be unit-tested offline.
  */
 
+import type { RequestRecord } from '../util/diagnostics';
+
 export const FABRIC_API_BASE_URL = 'https://api.fabric.microsoft.com/v1';
 
 export interface Workspace {
@@ -24,6 +26,26 @@ export interface Notebook {
   workspaceId: string;
   folderId?: string;
 }
+
+/** Any Fabric item, e.g. a lakehouse or environment. */
+export interface Item {
+  id: string;
+  displayName: string;
+  type: string;
+  workspaceId: string;
+  description?: string;
+  folderId?: string;
+}
+
+/** A workspace folder. */
+export interface Folder {
+  id: string;
+  displayName: string;
+  parentFolderId?: string;
+}
+
+/** A Fabric response kept as returned (metadata is saved as-is). */
+export type JsonRecord = Record<string, unknown>;
 
 /** One file of an item definition, e.g. `notebook-content.py`. */
 export interface DefinitionPart {
@@ -84,6 +106,8 @@ export interface FabricClientOptions {
   maxRetries?: number;
   /** Waits for the given number of milliseconds; replaceable in tests. */
   delay?: (ms: number) => Promise<void>;
+  /** Told about each HTTP request and each long-running operation, for diagnostics. Never given tokens. */
+  onRequest?: (record: RequestRecord) => void;
 }
 
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
@@ -109,6 +133,7 @@ export class FabricClient {
   private readonly baseUrl: string;
   private readonly maxRetries: number;
   private readonly delay: (ms: number) => Promise<void>;
+  private readonly onRequest: (record: RequestRecord) => void;
 
   constructor(options: FabricClientOptions) {
     this.getToken = options.getToken;
@@ -116,6 +141,7 @@ export class FabricClient {
     this.baseUrl = (options.baseUrl ?? FABRIC_API_BASE_URL).replace(/\/+$/, '');
     this.maxRetries = options.maxRetries ?? 3;
     this.delay = options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.onRequest = options.onRequest ?? (() => undefined);
   }
 
   /** Workspaces the signed-in user can access. */
@@ -128,6 +154,61 @@ export class FabricClient {
     return this.listAll<Notebook>(
       `${this.baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/notebooks`,
     );
+  }
+
+  /** Items in a workspace: all of them, or one type (e.g. its lakehouses or environments). */
+  listItems(workspaceId: string, type?: string): Promise<Item[]> {
+    const query = type ? `?type=${encodeURIComponent(type)}` : '';
+    return this.listAll<Item>(`${this.workspaceUrl(workspaceId)}/items${query}`);
+  }
+
+  /** A workspace's properties (capacity, region, and so on). */
+  getWorkspace(workspaceId: string): Promise<JsonRecord> {
+    return this.get<JsonRecord>(this.workspaceUrl(workspaceId));
+  }
+
+  /** A workspace's folders (`parentFolderId` links them into a tree). */
+  listFolders(workspaceId: string): Promise<Folder[]> {
+    return this.listAll<Folder>(`${this.workspaceUrl(workspaceId)}/folders`);
+  }
+
+  /** A lakehouse, with its OneLake paths and SQL analytics endpoint in `properties`. */
+  getLakehouse(workspaceId: string, lakehouseId: string): Promise<JsonRecord> {
+    return this.get<JsonRecord>(`${this.workspaceUrl(workspaceId)}/lakehouses/${encodeURIComponent(lakehouseId)}`);
+  }
+
+  /** A lakehouse's tables (not available for lakehouses with schemas). */
+  listLakehouseTables(workspaceId: string, lakehouseId: string): Promise<JsonRecord[]> {
+    return this.listAll<JsonRecord>(`${this.workspaceUrl(workspaceId)}/lakehouses/${encodeURIComponent(lakehouseId)}/tables`);
+  }
+
+  /** A workspace's warehouses, with their connection strings in `properties`. */
+  listWarehouses(workspaceId: string): Promise<JsonRecord[]> {
+    return this.listAll<JsonRecord>(`${this.workspaceUrl(workspaceId)}/warehouses`);
+  }
+
+  /** An environment, with its publish state in `properties`. */
+  getEnvironment(workspaceId: string, environmentId: string): Promise<JsonRecord> {
+    return this.get<JsonRecord>(`${this.workspaceUrl(workspaceId)}/environments/${encodeURIComponent(environmentId)}`);
+  }
+
+  /** The workspace's Git connection (provider, repository, branch), if any. */
+  getGitConnection(workspaceId: string): Promise<JsonRecord> {
+    return this.get<JsonRecord>(`${this.workspaceUrl(workspaceId)}/git/connection`);
+  }
+
+  /** The workspace's Spark settings (pools, environment, jobs). */
+  getSparkSettings(workspaceId: string): Promise<JsonRecord> {
+    return this.get<JsonRecord>(`${this.workspaceUrl(workspaceId)}/spark/settings`);
+  }
+
+  /** Who has which role in the workspace (needs a role that can see them). */
+  listRoleAssignments(workspaceId: string): Promise<JsonRecord[]> {
+    return this.listAll<JsonRecord>(`${this.workspaceUrl(workspaceId)}/roleAssignments`);
+  }
+
+  private workspaceUrl(workspaceId: string): string {
+    return `${this.baseUrl}/workspaces/${encodeURIComponent(workspaceId)}`;
   }
 
   /** A notebook's content. Omit `format` for Fabric's Git format (`notebook-content.py`). */
@@ -180,10 +261,20 @@ export class FabricClient {
    * https://learn.microsoft.com/rest/api/fabric/articles/long-running-operation
    */
   private async send<T>(method: 'POST', url: string, body?: unknown): Promise<T> {
+    const started = Date.now();
     const response = await this.fetchWithRetry(url, method, body);
     if (response.status !== 202) {
       return (await readJson(response)) as T;
     }
+    const stats = { polls: 0, waitedMs: 0 };
+    try {
+      return await this.followOperation<T>(response, stats);
+    } finally {
+      this.onRequest({ kind: 'operation', method, url: describeUrl(url), ms: Date.now() - started, ...stats });
+    }
+  }
+
+  private async followOperation<T>(response: Response, stats: { polls: number; waitedMs: number }): Promise<T> {
     let location = response.headers.get('Location');
     if (!location) {
       throw new FabricApiError(202, 'MissingLocation', 'Fabric accepted the request but gave no operation to follow.');
@@ -195,6 +286,8 @@ export class FabricClient {
         throw new FabricApiError(0, 'OperationTimeout', `Fabric didn't finish the operation within ${MAX_OPERATION_SECONDS / 60} minutes.`);
       }
       await this.delay(wait);
+      stats.waitedMs += wait;
+      stats.polls++;
       const poll = await this.fetchWithRetry(location, 'GET');
       const state = (await poll.json()) as OperationState;
       const next = poll.headers.get('Location');
@@ -270,12 +363,23 @@ export class FabricClient {
       if (body !== undefined) {
         headers['Content-Type'] = 'application/json';
       }
+      const started = Date.now();
       const response = await this.fetchFn(url, {
         method,
         // The token must only go where `assertTrusted` allows; Fabric doesn't use HTTP redirects.
         redirect: 'error',
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const retryAfter = response.headers.get('Retry-After');
+      this.onRequest({
+        kind: 'request',
+        method,
+        url: describeUrl(url),
+        status: response.status,
+        ms: Date.now() - started,
+        attempt: attempt + 1,
+        ...(retryAfter !== null && Number.isFinite(Number(retryAfter)) ? { retryAfterMs: Number(retryAfter) * 1000 } : {}),
       });
 
       if (response.ok || allowed.includes(response.status)) {
@@ -288,6 +392,12 @@ export class FabricClient {
       throw await toError(response);
     }
   }
+}
+
+/** A URL for the diagnostics log: host, path and query only. */
+function describeUrl(url: string): string {
+  const u = new URL(url);
+  return `${u.host}${u.pathname}${u.search}`;
 }
 
 function retryAfterMs(header: string | null, defaultSeconds = DEFAULT_RETRY_AFTER_SECONDS): number {

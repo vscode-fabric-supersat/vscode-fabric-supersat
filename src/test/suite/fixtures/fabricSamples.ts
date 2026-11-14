@@ -183,3 +183,12 @@ export const SCRATCH3_PY = `# Fabric notebook source
 # META   "language_group": "synapse_pyspark"
 # META }
 `;
+
+/**
+ * A T-SQL notebook with a lakehouse's SQL analytics endpoint attached, as Fabric exports it in
+ * .ipynb format (2026-11; IDs replaced). Confirms: the kernel is `sqldatawarehouse` (also the
+ * cells' `language_group`, with `language: "sql"`), and attached endpoints are stored under
+ * `dependencies.warehouse` (`default_warehouse`, `known_warehouses` with `type: "Lakewarehouse"`
+ * for a lakehouse SQL analytics endpoint). T-SQL notebooks aren't supported (yet).
+ */
+export const TSQL_NOTEBOOK_IPYNB = `{"cells":[{"cell_type":"code","source":["-- Welcome to your new notebook\\n","-- Type here in the cell editor to add code!\\n"],"outputs":[],"execution_count":null,"metadata":{"microsoft":{"language":"sql","language_group":"sqldatawarehouse"}},"id":"00000000-0000-0000-0000-000000000012"}],"metadata":{"kernel_info":{"name":"sqldatawarehouse"},"kernelspec":{"name":"sqldatawarehouse","display_name":"sqldatawarehouse"},"language_info":{"name":"sql"},"microsoft":{"language":"sql","language_group":"sqldatawarehouse","ms_spell_check":{"ms_spell_check_language":"en"}},"nteract":{"version":"nteract-front-end@1.0.0"},"spark_compute":{"compute_id":"/trident/default","session_options":{"conf":{"spark.synapse.nbs.session.timeout":"1200000"}}},"dependencies":{"warehouse":{"default_warehouse":"00000000-0000-0000-0000-000000000013","known_warehouses":[{"id":"00000000-0000-0000-0000-000000000013","type":"Lakewarehouse"}]}}},"nbformat":4,"nbformat_minor":5}`;

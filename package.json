@@ -83,6 +83,21 @@
         "icon": "$(cloud-upload)"
       },
       {
+        "command": "fabric-supersat.downloadWorkspaceMetadata",
+        "title": "Download Workspace Metadata",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.testNotebookFormats",
+        "title": "Test Notebook Formats",
+        "category": "Fabric Supersat"
+      },
+      {
+        "command": "fabric-supersat.compareWithWorkspace",
+        "title": "Compare with Workspace",
+        "category": "Fabric Supersat"
+      },
+      {
         "command": "fabric-supersat.uploadAllNotebooks",
         "title": "Upload All Notebooks",
         "category": "Fabric Supersat"
@@ -133,7 +148,72 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Name of the Fabric workspace that commands work in when no folder is open (or the folder isn't trusted). Its ID is looked up in Fabric by this name; a name shared by more than one workspace is refused. With a trusted folder open, **Fabric Supersat: Select Workspace** saves the name in `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and this setting is ignored."
+          "markdownDescription": "Name of the Fabric workspace that commands work in when no folder is open (or the folder isn't trusted or is read-only). Its ID is looked up in Fabric by this name; a name shared by more than one workspace is refused. With a trusted folder open, the workspace is read from `.fabric-supersat/settings.yaml` in that folder (ignored by git) instead, and kept in sync with this setting: **Fabric Supersat: Select Workspace** saves both, editing either one in the window you're using updates the other (the file only if it exists), and opening a folder copies the workspace named in its file here."
+        },
+        "fabric-supersat.fabric.maxConcurrentRequests": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "scope": "window",
+          "markdownDescription": "How many notebooks **Download All Notebooks**, **Upload All Notebooks**, **Download Workspace Metadata**, **Test Notebook Formats** and **Compare with Workspace** work on at once. Most of the time is spent waiting on Fabric, so a few at once is much faster. Fabric's throttling (HTTP 429) is retried."
+        },
+        "fabric-supersat.diagnostics.logToFiles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Keep diagnostic files in the project's `.fabric-supersat` folder (git-ignored): `diagnostics/requests.jsonl` (each Fabric request's timing, never tokens or contents), `logs/fabric-supersat.log` (a copy of the Output channel) and `history.jsonl` (each notebook download and upload). Each file is capped in size. Nothing is written until the folder exists."
+        },
+        "fabric-supersat.metadata.includeMemberRoles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Include who has which role in the workspace (names and email addresses) in **Download Workspace Metadata**. Needs a workspace role that can see them; otherwise the section is listed as not available."
+        },
+        "fabric-supersat.notebooks.upload.defaultLakehouse": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the default lakehouse at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the default lakehouse exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its default lakehouse (`default_lakehouse` and `default_lakehouse_workspace_id` in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. A reference saved as \"same workspace\" keeps it. A folder's `.fabric-supersat/settings.yaml` overrides this (`notebooks.upload.defaultLakehouse`), which is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.upload.otherLakehouses": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the other attached lakehouses at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the other attached lakehouses exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its other attached lakehouses (`known_lakehouses`; they are looked up in the default lakehouse's workspace in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. A reference saved as \"same workspace\" keeps it. A folder's `.fabric-supersat/settings.yaml` overrides this (`notebooks.upload.otherLakehouses`), which is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.upload.environment": {
+          "type": "string",
+          "enum": ["replace", "keep"],
+          "enumDescriptions": [
+            "Point the environment at the item with the same name in the workspace you upload to, and write the new ID to the notebook's local files first. Warns if that workspace has no item with that name.",
+            "Upload the environment exactly as it is in the file."
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "What uploading a notebook does with its environment (`environmentId` and `workspaceId` under `environment` in the notebook's header), so the same files can be uploaded to several workspaces (e.g. Dev, Test and Prod), as Microsoft's fabric-cicd does. Changed IDs are written to the local files before uploading, so source control shows them, to commit or revert. A reference saved as \"same workspace\" keeps it. A folder's `.fabric-supersat/settings.yaml` overrides this (`notebooks.upload.environment`), which is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.sameWorkspace.defaultLakehouse": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "markdownDescription": "Save the default lakehouse's workspace as \"same workspace\" (`00000000-0000-0000-0000-000000000000` in `default_lakehouse_workspace_id`) when it is the notebook's own workspace: in downloaded notebooks, and when uploading writes new IDs to the local files. The files then name no workspace, as Fabric's Git integration writes them. A folder's `.fabric-supersat/settings.yaml` overrides this (`notebooks.sameWorkspace.defaultLakehouse`), which is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
+        },
+        "fabric-supersat.notebooks.sameWorkspace.environment": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "markdownDescription": "Save the environment's workspace as \"same workspace\" (`00000000-0000-0000-0000-000000000000` in the environment's `workspaceId`) when it is the notebook's own workspace: in downloaded notebooks, and when uploading writes new IDs to the local files. The files then name no workspace, as Fabric's Git integration writes them. A folder's `.fabric-supersat/settings.yaml` overrides this (`notebooks.sameWorkspace.environment`), which is created with this setting's value. See [Lakehouses and environments in other workspaces](https://github.com/vscode-fabric-supersat/vscode-fabric-supersat#lakehouses-and-environments-in-other-workspaces)."
         }
       }
     },

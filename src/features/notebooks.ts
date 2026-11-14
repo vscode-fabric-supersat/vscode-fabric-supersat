@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Commands } from '../constants';
-import type { Notebook } from '../fabric/client';
+import type { FabricClient, Notebook } from '../fabric/client';
 import type { ResolvedWorkspace } from '../workspace/service';
 import {
   checkNotebookName,
@@ -16,18 +16,23 @@ import {
   syncNotebookFiles,
   wasWrittenByExtension,
 } from '../notebooks/files';
+import { ReferenceMapper, type ReferenceSettings } from '../notebooks/references';
 import { FABRIC_NOTEBOOK_TYPE, FabricNotebookSerializer } from '../notebooks/serializer';
 import {
   type BulkOptions,
   type BulkResult,
+  type PlannedUpload,
   downloadNotebook,
   downloadNotebooks,
   planUploads,
   runUploads,
   uploadNotebook,
 } from '../notebooks/transfer';
+import { getConfig } from '../util/config';
+import { withActivity } from '../util/diagnostics';
 import { reportError } from '../util/errors';
-import { exists, projectRoot } from '../util/localState';
+import { changedSinceSync, readSyncState } from '../workspace/state';
+import { ensureLocalStateDir, exists, localStateDir, projectRoot } from '../util/localState';
 import { getLogger } from '../util/logger';
 import { withProgress } from '../util/progress';
 import type { Feature } from './feature';
@@ -53,7 +58,7 @@ export const notebooks: Feature = {
         transientOutputs: true,
       }),
 
-      vscode.commands.registerCommand(Commands.downloadNotebook, async () => {
+      vscode.commands.registerCommand(Commands.downloadNotebook, timed('Download Notebook', async () => {
         try {
           const workspace = await current.resolve();
           if (!workspace) {
@@ -66,8 +71,12 @@ export const notebooks: Feature = {
             return undefined;
           }
           const root = requireProjectRoot('download notebooks into');
+          const settings = await current.notebookSettings();
           const files = await withProgress(`Downloading "${picked.displayName}"…`, () =>
-            downloadNotebook(fabric, root, workspace.id, picked, confirmReplace),
+            downloadNotebook(fabric, root, workspace.id, picked, confirmReplace, {
+              sameWorkspace: settings.sameWorkspace,
+              workspaceName: workspace.name,
+            }),
           );
           if (files) {
             getLogger().info(`Downloaded notebook "${files.name}" from ${workspace.name}`);
@@ -78,9 +87,9 @@ export const notebooks: Feature = {
           await reportError('Download notebook', err);
           return undefined;
         }
-      }),
+      })),
 
-      vscode.commands.registerCommand(Commands.downloadAllNotebooks, async () => {
+      vscode.commands.registerCommand(Commands.downloadAllNotebooks, timed('Download All Notebooks', async () => {
         try {
           const root = requireProjectRoot('download notebooks into');
           const workspace = await current.resolve();
@@ -117,8 +126,15 @@ export const notebooks: Feature = {
             }
             replaceExisting = choice === 'Replace Existing';
           }
+          // Before the loop, so creating .fabric-supersat is asked about once.
+          await ensureLocalStateDir(localStateDir(root));
+          const settings = await current.notebookSettings();
           const result = await withBulkProgress(`Downloading notebooks from ${workspace.name}`, (options) =>
-            downloadNotebooks(fabric, root, workspace.id, items, replaceExisting, options),
+            downloadNotebooks(fabric, root, workspace.id, items, replaceExisting, {
+              ...options,
+              sameWorkspace: settings.sameWorkspace,
+              workspaceName: workspace.name,
+            }),
           );
           await reportBulk('Downloaded', 'from', workspace, result);
           return result;
@@ -126,9 +142,9 @@ export const notebooks: Feature = {
           await reportError('Download all notebooks', err);
           return undefined;
         }
-      }),
+      })),
 
-      vscode.commands.registerCommand(Commands.uploadAllNotebooks, async () => {
+      vscode.commands.registerCommand(Commands.uploadAllNotebooks, timed('Upload All Notebooks', async () => {
         try {
           const root = requireProjectRoot('upload notebooks from');
           const local = await listLocalNotebooks(root);
@@ -136,6 +152,9 @@ export const notebooks: Feature = {
             void vscode.window.showInformationMessage('No notebooks in src/Notebooks to upload.');
             return undefined;
           }
+          // Before saving, so creating .fabric-supersat is asked about once.
+          await ensureLocalStateDir(localStateDir(root));
+          const settings = await current.notebookSettings();
           // Upload what's on screen: save open notebooks first (which also syncs their other file).
           const ready: NotebookFiles[] = [];
           const notSaved: { name: string; reason: string }[] = [];
@@ -159,6 +178,17 @@ export const notebooks: Feature = {
           }
           const overwrite = plan.uploads.filter((u) => u.existing).map((u) => u.files.name);
           const create = plan.uploads.filter((u) => !u.existing).map((u) => u.files.name);
+          // Notebooks changed locally since they were last downloaded from or uploaded to this workspace.
+          const state = await readSyncState(root, workspace.name);
+          const changed: PlannedUpload[] = [];
+          for (const upload of plan.uploads) {
+            if (await changedSinceSync(state, upload.files.name, upload.py)) {
+              changed.push(upload);
+            }
+          }
+          const all = `Upload All (${plan.uploads.length})`;
+          const onlyChanged = `Upload Changed (${changed.length})`;
+          const offerChanged = changed.length > 0 && changed.length < plan.uploads.length;
           const choice = await vscode.window.showWarningMessage(
             `Upload ${plan.uploads.length} notebooks to ${workspace.name}?`,
             {
@@ -167,26 +197,39 @@ export const notebooks: Feature = {
                 overwrite.length ? `Overwrite ${overwrite.length}: ${nameList(overwrite)}.` : '',
                 create.length ? `Create ${create.length}: ${nameList(create)}.` : '',
                 skipped.length ? `Skip ${skipped.length} that can't be uploaded: ${nameList(skipped.map((s) => s.name))}.` : '',
+                offerChanged
+                  ? `Changed here since last downloaded from or uploaded to ${workspace.name}: ${nameList(changed.map((u) => u.files.name))}. ` +
+                    'Upload Changed doesn\'t see changes made in Fabric since; Upload All overwrites them.'
+                  : '',
+                uploadChangesReferences(settings) ? REFERENCES_NOTE : '',
               ]
                 .filter(Boolean)
                 .join('\n\n'),
             },
-            'Upload',
+            ...(offerChanged ? [onlyChanged, all] : ['Upload']),
           );
-          if (choice !== 'Upload') {
+          if (!choice) {
             return undefined;
           }
+          const uploads = choice === onlyChanged ? changed : plan.uploads;
+          if (choice === onlyChanged) {
+            skipped.push(
+              ...plan.uploads.filter((u) => !changed.includes(u)).map((u) => ({ name: u.files.name, reason: 'unchanged since last synced' })),
+            );
+          }
+          const references = referenceMapper(fabric, workspace, settings);
           const result = await withBulkProgress(`Uploading notebooks to ${workspace.name}`, (options) =>
-            runUploads(fabric, workspace.id, plan.uploads, options),
+            runUploads(fabric, workspace.id, uploads, { ...options, references, workspaceName: workspace.name }),
           );
           result.skipped.push(...skipped);
           await reportBulk('Uploaded', 'to', workspace, result);
+          reportKeptReferences(references, workspace);
           return result;
         } catch (err) {
           await reportError('Upload all notebooks', err);
           return undefined;
         }
-      }),
+      })),
 
       vscode.commands.registerCommand(Commands.newNotebook, async (name?: string, type?: NewNotebookType) => {
         try {
@@ -225,14 +268,14 @@ export const notebooks: Feature = {
         }
       }),
 
-      vscode.commands.registerCommand(Commands.uploadNotebook, async (arg?: unknown) => {
+      vscode.commands.registerCommand(Commands.uploadNotebook, timed('Save and Upload Notebook', async (arg?: unknown) => {
         try {
           return await saveAndUpload(arg instanceof vscode.Uri ? arg : activeUri());
         } catch (err) {
           await reportError('Upload notebook', err);
           return undefined;
         }
-      }),
+      })),
 
       vscode.workspace.onDidSaveNotebookDocument((doc) => void syncAfterSave(doc.uri)),
       vscode.workspace.onDidSaveTextDocument((doc) => void syncAfterSave(doc.uri)),
@@ -257,24 +300,78 @@ export const notebooks: Feature = {
       if (doc?.isDirty && !(await doc.save())) {
         return undefined;
       }
+      const settings = await current.notebookSettings();
       await syncNotebookFiles(files, kind);
 
       const workspace = await current.resolve();
       if (!workspace) {
         return undefined;
       }
+      const references = referenceMapper(fabric, workspace, settings);
       const result = await withProgress(`Uploading "${files.name}"…`, () =>
-        uploadNotebook(fabric, files, workspace.id, (existing) => confirmUpload(files, existing, workspace.name)),
+        uploadNotebook(
+          fabric,
+          files,
+          workspace.id,
+          (existing) => confirmUpload(files, existing, workspace.name, uploadChangesReferences(settings)),
+          { references, workspaceName: workspace.name },
+        ),
       );
       if (result) {
         const message = `${result === 'created' ? 'Created' : 'Updated'} notebook "${files.name}" in ${workspace.name}.`;
         getLogger().info(message);
         void vscode.window.showInformationMessage(message);
+        reportKeptReferences(references, workspace);
       }
       return result;
     }
   },
 };
+
+const REFERENCES_NOTE =
+  "Lakehouse and environment IDs are pointed at the workspace's items of the same name, and written to the local files first " +
+  '(see notebooks.upload in .fabric-supersat/settings.yaml).';
+
+/** Runs a command, logging how many Fabric requests it made and how long it took (see `util/diagnostics.ts`). */
+function timed<A extends unknown[], R>(title: string, handler: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  return (...args: A) => withActivity(title, () => handler(...args), (_summary, line) => getLogger().info(line));
+}
+
+/** How many notebooks bulk commands work on at once (the `fabric.maxConcurrentRequests` setting). */
+export function maxConcurrentRequests(): number {
+  return getConfig().fabric.maxConcurrentRequests;
+}
+
+/** Whether any `notebooks.upload.*` setting replaces IDs (see `notebooks/references.ts`). */
+function uploadChangesReferences(settings: ReferenceSettings): boolean {
+  return Object.values(settings.upload).includes('replace');
+}
+
+/** Points references at the workspace's items on upload, as the `notebooks.upload.*` settings say. */
+function referenceMapper(
+  fabric: FabricClient,
+  workspace: ResolvedWorkspace,
+  settings: ReferenceSettings,
+): ReferenceMapper | undefined {
+  return uploadChangesReferences(settings)
+    ? new ReferenceMapper((id, type) => fabric.listItems(id, type), workspace.id, settings)
+    : undefined;
+}
+
+/** Warns when uploaded notebooks still point at lakehouses or environments outside the workspace. */
+function reportKeptReferences(references: ReferenceMapper | undefined, workspace: ResolvedWorkspace): void {
+  if (!references?.kept.length) {
+    return;
+  }
+  const count = references.kept.length;
+  void vscode.window
+    .showWarningMessage(
+      `${count} lakehouse or environment reference${count === 1 ? '' : 's'} couldn't be matched to an item in ` +
+        `${workspace.name} and ${count === 1 ? 'was' : 'were'} uploaded unchanged.`,
+      'Show Log',
+    )
+    .then((choice) => choice && getLogger().show());
+}
 
 /**
  * Watches each `src/Notebooks/<Name>/<Name>.py` so a `.py` changed outside the editor (git discard,
@@ -324,7 +421,7 @@ async function syncFromDisk(uri: vscode.Uri): Promise<void> {
     return;
   }
   try {
-    if (await syncNotebookFiles(files, 'py')) {
+    if (await syncNotebookFiles(files, 'py', { background: true })) {
       getLogger().info(`Updated ${vscode.workspace.asRelativePath(files.ipynb)}: ${vscode.workspace.asRelativePath(files.py)} changed on disk`);
     }
   } catch (err) {
@@ -346,7 +443,7 @@ async function refreshStaleNotebooks(): Promise<void> {
         continue;
       }
       try {
-        if (await refreshIpynbIfStale(files)) {
+        if (await refreshIpynbIfStale(files, { background: true })) {
           getLogger().info(`Updated ${vscode.workspace.asRelativePath(files.ipynb)} from ${vscode.workspace.asRelativePath(files.py)}`);
         }
       } catch (err) {
@@ -384,8 +481,8 @@ function withBulkProgress(title: string, run: (options: BulkOptions) => Promise<
     (progress, token) =>
       run({
         isCancelled: () => token.isCancellationRequested,
-        onProgress: (name, index, total) =>
-          progress.report({ message: `${index + 1}/${total}: ${name}`, increment: index ? 100 / total : 0 }),
+        onProgress: (name, done, total) => progress.report({ message: `${done}/${total} done (${name})`, increment: 100 / total }),
+        concurrency: maxConcurrentRequests(),
       }),
   );
 }
@@ -459,7 +556,7 @@ async function pickNotebookType(): Promise<NewNotebookType | undefined> {
     })),
     {
       title: 'Fabric: Create New Fabric Notebook',
-      placeHolder: 'Notebook type (Spark SQL, Scala and SparkR notebooks aren’t supported yet)',
+      placeHolder: 'Notebook type (Spark SQL, T-SQL, Scala and SparkR notebooks aren’t supported yet)',
     },
   );
   return picked?.type;
@@ -495,7 +592,12 @@ async function confirmReplace(files: NotebookFiles): Promise<boolean> {
   return choice === 'Replace';
 }
 
-async function confirmUpload(files: NotebookFiles, existing: Notebook | undefined, workspaceName: string): Promise<boolean> {
+async function confirmUpload(
+  files: NotebookFiles,
+  existing: Notebook | undefined,
+  workspaceName: string,
+  changesReferences: boolean,
+): Promise<boolean> {
   const action = existing ? 'Overwrite' : 'Create';
   const choice = await vscode.window.showWarningMessage(
     existing
@@ -503,9 +605,14 @@ async function confirmUpload(files: NotebookFiles, existing: Notebook | undefine
       : `Create notebook "${files.name}" in ${workspaceName}?`,
     {
       modal: true,
-      detail: existing
-        ? `The notebook in Fabric will be replaced with ${vscode.workspace.asRelativePath(files.py)}.`
-        : `There is no notebook named "${files.name}" in ${workspaceName} yet.`,
+      detail: [
+        existing
+          ? `The notebook in Fabric will be replaced with ${vscode.workspace.asRelativePath(files.py)}.`
+          : `There is no notebook named "${files.name}" in ${workspaceName} yet.`,
+        changesReferences ? REFERENCES_NOTE : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     },
     action,
   );

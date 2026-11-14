@@ -7,6 +7,8 @@ import { VscodeSessionProvider } from './auth/vscodeSession';
 import { FabricClient } from './fabric/client';
 import type { Services } from './features/feature';
 import { features } from './features';
+import { flushDiagnostics, recordRequest } from './util/diagnostics';
+import { askToCreateLocalStateDir, setLocalStateDirConfirmation } from './util/localState';
 import { disposeLogger, getLogger } from './util/logger';
 import { withProgress } from './util/progress';
 import { showWorkspacePicker, WorkspaceService } from './workspace/service';
@@ -29,6 +31,9 @@ export function createExtension(platform: Platform) {
       const logger = getLogger();
       logger.info(`Activating ${platform.name} build (${vscode.env.appName}, ${vscode.UIKind[vscode.env.uiKind]})`);
 
+      // Always ask before creating a project's .fabric-supersat folder.
+      setLocalStateDirConfirmation(askToCreateLocalStateDir);
+
       // Sign-in settings come from the extension's own state, never from settings files.
       initAuthSettings(context.globalState);
       const auth = new FabricAuth([
@@ -45,6 +50,7 @@ export function createExtension(platform: Platform) {
       ]);
       const fabric = new FabricClient({
         getToken: () => auth.getToken('fabric', 'Fabric Supersat needs to sign in to read your Fabric workspaces.'),
+        onRequest: recordRequest,
       });
       const workspace = new WorkspaceService({
         list: async () => withProgress('Loading workspaces…', () => fabric.listWorkspaces()),
@@ -63,7 +69,8 @@ export function createExtension(platform: Platform) {
       }
     },
 
-    deactivate(): void {
+    async deactivate(): Promise<void> {
+      await flushDiagnostics();
       disposeLogger();
     },
   };

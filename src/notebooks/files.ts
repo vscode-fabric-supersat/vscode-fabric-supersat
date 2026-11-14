@@ -11,7 +11,14 @@
  * (its description), for source control next to the `.py`.
  */
 import * as vscode from 'vscode';
-import { assertSafeWritePath, ensureLocalStateDir, exists, LOCAL_DIR_NAME, localStateDir } from '../util/localState';
+import {
+  assertSafeWritePath,
+  ensureLocalStateDir,
+  type EnsureLocalStateDirOptions,
+  exists,
+  LOCAL_DIR_NAME,
+  localStateDir,
+} from '../util/localState';
 import { readYamlFile, updateYamlFile, YamlFileError } from '../util/yamlFile';
 import {
   type FabricNotebook,
@@ -248,7 +255,11 @@ export function isNotebookContent(kind: NotebookFileKind, text: string): boolean
  * Both files must pass the content check: a saved file that isn't a notebook isn't synced,
  * and an existing file that isn't one is never overwritten (`NotFabricNotebookError`).
  */
-export async function syncNotebookFiles(files: NotebookFiles, saved: NotebookFileKind): Promise<boolean> {
+export async function syncNotebookFiles(
+  files: NotebookFiles,
+  saved: NotebookFileKind,
+  options: EnsureLocalStateDirOptions = {},
+): Promise<boolean> {
   const [source, target, targetKind] =
     saved === 'py' ? [files.py, files.ipynb, 'ipynb' as const] : [files.ipynb, files.py, 'py' as const];
   const text = await readText(source);
@@ -268,7 +279,7 @@ export async function syncNotebookFiles(files: NotebookFiles, saved: NotebookFil
     return false;
   }
   if (saved === 'py') {
-    await ensureLocalStateDir(files.localDir);
+    await ensureLocalStateDir(files.localDir, options);
   }
   await writeText(files.root, target, next);
   return true;
@@ -279,7 +290,7 @@ export async function syncNotebookFiles(files: NotebookFiles, saved: NotebookFil
  * when the `.py` is newer (e.g. after a `git pull` while VS Code was closed), or creates it
  * when missing (e.g. a fresh clone). Returns whether the `.ipynb` was written.
  */
-export async function refreshIpynbIfStale(files: NotebookFiles): Promise<boolean> {
+export async function refreshIpynbIfStale(files: NotebookFiles, options: EnsureLocalStateDirOptions = {}): Promise<boolean> {
   let py: vscode.FileStat;
   try {
     py = await vscode.workspace.fs.stat(files.py);
@@ -293,7 +304,7 @@ export async function refreshIpynbIfStale(files: NotebookFiles): Promise<boolean
   } catch {
     // No .ipynb yet: create it.
   }
-  return syncNotebookFiles(files, 'py');
+  return syncNotebookFiles(files, 'py', options);
 }
 
 /** Files this extension wrote recently, so its file watcher can ignore its own writes. */
@@ -319,6 +330,12 @@ export async function readTextIfExists(uri: vscode.Uri): Promise<string | undefi
     }
     throw err;
   }
+}
+
+/** Replaces a notebook's `.py` and regenerates its `.ipynb` from it (keeping outputs). */
+export async function writeNotebookPy(files: NotebookFiles, pyText: string): Promise<void> {
+  await writeText(files.root, files.py, pyText);
+  await syncNotebookFiles(files, 'py');
 }
 
 /** Writes a file inside `root`, refusing paths through symbolic links (see `assertSafeWritePath`). */

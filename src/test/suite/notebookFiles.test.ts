@@ -23,10 +23,21 @@ import {
   findByName,
   planUploads,
   runUploads,
+  ipynbLanguage,
+  isTsqlNotebook,
+  unsupportedNotebook,
   uploadNotebook,
 } from '../../notebooks/transfer';
 import { FABRIC_PY_HEADER, formatFabricPy, ipynbToFabric, isFabricIpynb, isFabricPy, parseFabricPy } from '../../notebooks/format';
-import { SCRATCH2_IPYNB, SCRATCH2_TSQL_LAKEHOUSE_IPYNB } from './fixtures/fabricSamples';
+import {
+  FABRIC_CICD_EXAMPLE_PY,
+  SCRATCH2_IPYNB,
+  SCRATCH2_TSQL_LAKEHOUSE_IPYNB,
+  SCRATCH2_TSQL_LAKEHOUSE_PY,
+  TSQL_NOTEBOOK_IPYNB,
+} from './fixtures/fabricSamples';
+import { ReferenceMapper, SAME_WORKSPACE_ID } from '../../notebooks/references';
+import { fromBase64 } from '../../util/base64';
 import { toBase64 } from '../../util/base64';
 import { LOCAL_GITIGNORE, UnsafePathError } from '../../util/localState';
 import { MemFs } from './memFs';
@@ -69,6 +80,8 @@ const encode = (text: string) => new TextEncoder().encode(text);
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const part = (path: string, text: string) => ({ path, payload: toBase64(encode(text)), payloadType: 'InlineBase64' });
+/** Fabric's answer to getDefinition (its Git format). */
+const gitDefinition = (py: string) => json({ definition: { parts: [part('notebook-content.py', py), part('.platform', '{}')] } });
 
 /** A FabricClient whose fetch replays `responses`, recording "METHOD url" and request bodies. */
 function fakeClient(responses: Response[]) {
@@ -291,28 +304,63 @@ suite('Notebook files', () => {
     assert.strictEqual(text(vscode.Uri.joinPath(files.localDir, '.gitignore')), LOCAL_GITIGNORE);
   });
 
-  test('download writes both files exactly as Fabric exports them', async () => {
-    const { client, calls } = fakeClient([
-      json({ definition: { parts: [part('notebook-content.py', PY), part('.platform', '{}')] } }),
-      json({ definition: { format: 'ipynb', parts: [part('notebook-content.ipynb', IPYNB)] } }),
-    ]);
+  test('download makes one request: Fabric’s .py as it is, and an .ipynb generated from it, without Fabric’s outputs', async () => {
+    const { client, calls } = fakeClient([gitDefinition(PY)]);
     const files = await downloadNotebook(client, root, 'w1', { id: 'n1', displayName: 'Load' }, async () => {
       throw new Error('should not ask: nothing to replace');
     });
     assert.ok(files);
     assert.strictEqual(text(files.py), PY);
-    assert.strictEqual(text(files.ipynb), IPYNB);
+    const ipynb = JSON.parse(text(files.ipynb)!);
+    assert.deepStrictEqual(ipynb.cells.map((c: { source: string[]; outputs: unknown[] }) => [c.source, c.outputs]), [[['print("héllo")'], []]]);
+    assert.ok(isFabricIpynb(text(files.ipynb)!));
     assert.strictEqual(text(vscode.Uri.joinPath(files.localDir, '.gitignore')), LOCAL_GITIGNORE);
-    assert.deepStrictEqual(calls.sort(), [
-      'POST /workspaces/w1/notebooks/n1/getDefinition',
-      'POST /workspaces/w1/notebooks/n1/getDefinition?format=ipynb',
-    ]);
+    assert.deepStrictEqual(calls, ['POST /workspaces/w1/notebooks/n1/getDefinition']);
   });
 
-  const definitions = () => [
-    json({ definition: { parts: [part('notebook-content.py', PY), part('.platform', '{}')] } }),
-    json({ definition: { format: 'ipynb', parts: [part('notebook-content.ipynb', IPYNB)] } }),
-  ];
+  test('downloading again keeps the local .ipynb’s outputs for cells whose code is unchanged', async () => {
+    const files = notebookFiles(root, 'Load');
+    await write(files.ipynb, IPYNB);
+    const { client } = fakeClient([gitDefinition(PY)]);
+    await downloadNotebook(client, root, 'w1', { id: 'n1', displayName: 'Load' }, async () => true);
+    assert.deepStrictEqual(JSON.parse(text(files.ipynb)!).cells[0].outputs, JSON.parse(IPYNB).cells[0].outputs);
+
+    const changed = fakeClient([gitDefinition(PY.replace('print("héllo")', 'print("bye")'))]);
+    await downloadNotebook(changed.client, root, 'w1', { id: 'n1', displayName: 'Load' }, async () => true);
+    assert.deepStrictEqual(JSON.parse(text(files.ipynb)!).cells[0].outputs, []);
+  });
+
+  const definitions = () => [gitDefinition(PY)];
+
+  test('upload writes the changed lakehouse IDs to both local files first, and uploads them', async () => {
+    const files = notebookFiles(root, 'Example');
+    await write(files.py, FABRIC_CICD_EXAMPLE_PY);
+    await syncNotebookFiles(files, 'py');
+    const references = new ReferenceMapper(async () => [{ id: 'lh-test', displayName: 'WithoutSchema' }], 'w-test');
+    const { client, bodies } = fakeClient([json({ value: [] }), json({ id: 'n9', displayName: 'Example' }, 201)]);
+    assert.strictEqual(await uploadNotebook(client, files, 'w-test', async () => true, { references }), 'created');
+
+    const py = text(files.py)!;
+    assert.notStrictEqual(py, FABRIC_CICD_EXAMPLE_PY);
+    assert.strictEqual(parseFabricPy(py).meta?.dependencies && (parseFabricPy(py).meta!.dependencies as { lakehouse: { default_lakehouse: string } }).lakehouse.default_lakehouse, 'lh-test');
+    const ipynb = JSON.parse(text(files.ipynb)!) as { metadata: { dependencies: { lakehouse: Record<string, unknown> } } };
+    assert.strictEqual(ipynb.metadata.dependencies.lakehouse.default_lakehouse, 'lh-test');
+    assert.strictEqual(ipynb.metadata.dependencies.lakehouse.default_lakehouse_workspace_id, 'w-test');
+    const sent = (bodies[1] as { definition: { parts: { payload: string }[] } }).definition.parts[0].payload;
+    assert.strictEqual(new TextDecoder().decode(fromBase64(sent)), py);
+  });
+
+  test('download can save the notebook’s own workspace as "same workspace", in both files', async () => {
+    const workspaceId = '00000000-0000-0000-0000-000000000010'; // FABRIC_CICD_EXAMPLE_PY's lakehouse workspace
+    const { client } = fakeClient([gitDefinition(FABRIC_CICD_EXAMPLE_PY)]);
+    const files = await downloadNotebook(client, root, workspaceId, { id: 'n1', displayName: 'Example' }, async () => true, {
+      sameWorkspace: { defaultLakehouse: true, environment: true },
+    });
+    assert.ok(files);
+    assert.strictEqual(text(files.py), FABRIC_CICD_EXAMPLE_PY.replace(workspaceId, SAME_WORKSPACE_ID));
+    const ipynb = JSON.parse(text(files.ipynb)!) as { metadata: { dependencies: { lakehouse: Record<string, unknown> } } };
+    assert.strictEqual(ipynb.metadata.dependencies.lakehouse.default_lakehouse_workspace_id, SAME_WORKSPACE_ID);
+  });
 
   test('download saves Fabric’s description in notebook.yaml', async () => {
     const { client } = fakeClient(definitions());
@@ -551,15 +599,57 @@ suite('Notebook files', () => {
   });
 
   test('download explains that Spark SQL, Scala and SparkR notebooks aren’t supported yet', async () => {
-    const { client } = fakeClient([
-      json({ definition: { parts: [part('notebook-content.scala', '// Fabric notebook source'), part('.platform', '{}')] } }),
-      json({ definition: { format: 'ipynb', parts: [part('notebook-content.ipynb', IPYNB)] } }),
-    ]);
-    await assert.rejects(
-      downloadNotebook(client, root, 'w1', { id: 'n1', displayName: 'Scala Job' }, async () => true),
-      /"Scala Job" is a Scala notebook \(notebook-content\.scala\)\. Only PySpark and Python notebooks are supported/,
-    );
+    for (const [path, message] of [
+      ['notebook-content.scala', /"Scala Job" is a Scala notebook \(notebook-content\.scala; it runs Scala on a Spark cluster\)\. Scala notebooks aren't supported yet, only PySpark and Python notebooks\.$/],
+      ['notebook-content.sql', /"Scala Job" is a Spark SQL notebook \(notebook-content\.sql; it runs Spark SQL on a Spark cluster\)\..*Spark SQL cells \(%%sql\) in a PySpark notebook are supported\.$/],
+      ['notebook-content.r', /"Scala Job" is a SparkR notebook/],
+    ] as const) {
+      const { client } = fakeClient([json({ definition: { parts: [part(path, '// Fabric notebook source\n'), part('.platform', '{}')] } })]);
+      await assert.rejects(downloadNotebook(client, root, 'w1', { id: 'n1', displayName: 'Scala Job' }, async () => true), message);
+    }
     assert.strictEqual(text(notebookFiles(root, 'Scala Job').py), undefined);
+    assert.strictEqual(ipynbLanguage(IPYNB), 'PySpark');
+    assert.strictEqual(ipynbLanguage(SCRATCH2_TSQL_LAKEHOUSE_IPYNB), 'Python');
+    assert.strictEqual(ipynbLanguage(TSQL_NOTEBOOK_IPYNB), 'T-SQL');
+  });
+
+  test('Spark SQL and T-SQL notebooks are told apart, and their SQL cells pointed to', () => {
+    const header = (prefix: string, kernel: string) =>
+      `${prefix} Fabric notebook source\n\n${prefix} METADATA ********************\n\n` +
+      `${prefix} META {\n${prefix} META   "kernel_info": {\n${prefix} META     "name": "${kernel}"\n${prefix} META   }\n${prefix} META }\n`;
+    assert.match(
+      unsupportedNotebook('Sales', 'notebook-content.sql', header('--', 'synapse_pyspark'))!,
+      /"Sales" is a Spark SQL notebook \(notebook-content\.sql; it runs Spark SQL on a Spark cluster\)\..*Spark SQL cells \(%%sql\) in a PySpark notebook are supported\.$/,
+    );
+    for (const [path, prefix] of [['notebook-content.sql', '--'], ['notebook-content.py', '#']]) {
+      assert.match(
+        unsupportedNotebook('Report', path, header(prefix, 'sqldatawarehouse'))!,
+        /"Report" is a T-SQL notebook \(.*; it runs T-SQL on a warehouse or SQL analytics endpoint\)\. T-SQL notebooks aren't supported yet.*T-SQL cells \(%%tsql\) in a Python notebook are supported\.$/,
+        path,
+      );
+    }
+    // A Python notebook with a T-SQL cell is fine.
+    assert.strictEqual(unsupportedNotebook('Scratch2', 'notebook-content.py', SCRATCH2_TSQL_LAKEHOUSE_PY), undefined);
+    assert.strictEqual(unsupportedNotebook('Load', 'notebook-content.py', PY), undefined);
+  });
+
+  test('a T-SQL notebook is refused on download, by the kernel in its Git-format header', async () => {
+    assert.ok(isTsqlNotebook(TSQL_NOTEBOOK_IPYNB));
+    assert.ok(!isTsqlNotebook(SCRATCH2_TSQL_LAKEHOUSE_IPYNB), 'a Python notebook with a T-SQL cell');
+    const header = '# Fabric notebook source\n\n# METADATA ********************\n\n# META {\n# META   "kernel_info": {\n# META     "name": "sqldatawarehouse"\n# META   }\n# META }\n';
+    const { client } = fakeClient([gitDefinition(header)]);
+    await assert.rejects(
+      downloadNotebook(client, root, 'w1', { id: 'n1', displayName: 'Endpoint Query' }, async () => true),
+      /"Endpoint Query" is a T-SQL notebook \(notebook-content\.py; it runs T-SQL on a warehouse or SQL analytics endpoint\)/,
+    );
+    assert.strictEqual(text(notebookFiles(root, 'Endpoint Query').py), undefined);
+  });
+
+  test('a local T-SQL notebook is refused on upload', async () => {
+    const tsql = PY.replace('# Fabric notebook source\n', '# Fabric notebook source\n\n# METADATA ********************\n\n# META {\n# META   "kernel_info": {\n# META     "name": "sqldatawarehouse"\n# META   }\n# META }\n');
+    const files = notebookFiles(root, 'Report');
+    await write(files.py, tsql);
+    await assert.rejects(uploadNotebook(fakeClient([]).client, files, 'w1', async () => true), /"Report" is a T-SQL notebook/);
   });
 
   test('finds the project’s notebooks from either file, ignoring other files and folders', async () => {
@@ -573,10 +663,7 @@ suite('Notebook files', () => {
 
   test('Download All: replaces or skips local copies as chosen, and carries on past a failing notebook', async () => {
     await write(notebookFiles(root, 'Kept').py, 'local edits');
-    const definitionResponses = () => [
-      json({ definition: { parts: [part('notebook-content.py', PY)] } }),
-      json({ definition: { format: 'ipynb', parts: [part('notebook-content.ipynb', IPYNB)] } }),
-    ];
+    const definitionResponses = () => [gitDefinition(PY)];
     const notebooks = [
       { id: 'n1', displayName: 'Kept' },
       { id: 'n2', displayName: 'a:b' }, // Can't be a folder name: fails before any request.
@@ -585,7 +672,7 @@ suite('Notebook files', () => {
     const progress: string[] = [];
     const { client } = fakeClient(definitionResponses());
     const skip = await downloadNotebooks(client, root, 'w1', notebooks, false, {
-      onProgress: (name, i, total) => progress.push(`${i + 1}/${total} ${name}`),
+      onProgress: (name, done, total) => progress.push(`${done}/${total} ${name}`),
     });
     assert.deepStrictEqual(skip.done, ['New']);
     assert.deepStrictEqual(skip.skipped, [{ name: 'Kept', reason: 'local copy kept' }]);

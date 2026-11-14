@@ -2,19 +2,39 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { EXTENSION_FULL_ID, ID_PREFIX } from '../../constants';
 import type { Workspace } from '../../fabric/client';
-import { LOCAL_GITIGNORE } from '../../util/localState';
+import {
+  ensureLocalStateDir,
+  LOCAL_GITIGNORE,
+  LocalStateDirDeclinedError,
+  setLocalStateDirConfirmation,
+} from '../../util/localState';
+import { DEFAULT_REFERENCE_SETTINGS } from '../../notebooks/references';
 import { NEW_SETTINGS_FILE, WorkspaceNameError, WorkspaceService, workspacesNamed } from '../../workspace/service';
 import { MemFs } from './memFs';
 
 const ws = (id: string, displayName: string): Workspace => ({ id, displayName, type: 'Workspace' });
 const settings = () => vscode.workspace.getConfiguration(ID_PREFIX);
-const clearSettings = () => settings().update('workspace.name', undefined, vscode.ConfigurationTarget.Global);
+const NOTEBOOK_SETTINGS = [
+  'notebooks.upload.defaultLakehouse',
+  'notebooks.upload.otherLakehouses',
+  'notebooks.upload.environment',
+  'notebooks.sameWorkspace.defaultLakehouse',
+  'notebooks.sameWorkspace.environment',
+];
+const clearSettings = async () => {
+  for (const key of ['workspace.name', ...NOTEBOOK_SETTINGS]) {
+    await settings().update(key, undefined, vscode.ConfigurationTarget.Global);
+  }
+};
 
 /**
  * A service over a fake Fabric whose workspaces are `fabric` (editable by the test), and a
  * picker that returns the queued workspaces, recording the current name it was given.
  */
-function createService(localDir: vscode.Uri | undefined, options: { isTrusted?: () => boolean } = {}) {
+function createService(
+  localDir: vscode.Uri | undefined,
+  options: { isTrusted?: () => boolean; isFocused?: () => boolean } = {},
+) {
   const fabric: Workspace[] = [ws('w1', 'Sales'), ws('w2', 'Finance')];
   const picks: (Workspace | undefined)[] = [];
   const pickerCalls: (string | undefined)[] = [];
@@ -29,6 +49,8 @@ function createService(localDir: vscode.Uri | undefined, options: { isTrusted?: 
       return picks.shift();
     },
     localDir: () => localDir,
+    // Not focused unless a test says so, so automatic syncs don't race the test's own steps.
+    isFocused: () => false,
     ...options,
   });
   return { service, fabric, picks, pickerCalls, listCalls: () => listCalls };
@@ -191,23 +213,207 @@ suite('WorkspaceService: folder open (local .fabric-supersat folder)', () => {
     await clearSettings();
   });
 
-  test('select creates settings.yaml (name only) from the template, git-ignores the folder, and leaves user settings alone', async () => {
+  test('select creates settings.yaml (name only) from the template, git-ignores the folder, and sets the user setting too', async () => {
     t.picks.push(ws('w1', 'Sales'));
     assert.deepStrictEqual(await t.service.select(), { id: 'w1', name: 'Sales' });
     assert.strictEqual(file(), NEW_SETTINGS_FILE.replace('name: ""', 'name: "Sales"'));
     assert.doesNotMatch(file() ?? '', /\bid:/);
     assert.strictEqual(memFs.text(`${dir.path}/.gitignore`), LOCAL_GITIGNORE);
-    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, undefined);
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Sales');
     assert.strictEqual(t.service.localFile?.toString(), vscode.Uri.joinPath(dir, 'settings.yaml').toString());
   });
 
-  test('ignores an ID in the file, and removes it on save, keeping comments and other settings', async () => {
+  test('ignores an ID in the file, and removes it on save, keeping comments and other settings, adding notebook settings', async () => {
     await vscode.workspace.fs.createDirectory(dir);
     await writeFile('# my notes\nworkspace:\n  id: "attacker-id"\n  name: Finance # dev workspace\n\nother: keep me\n');
     assert.deepStrictEqual(await t.service.refresh(), { name: 'Finance' });
     assert.deepStrictEqual(await t.service.resolve(), { id: 'w2', name: 'Finance' }, 'the ID comes from Fabric');
     await t.service.save({ name: 'Sales' });
-    assert.strictEqual(file(), '# my notes\nworkspace:\n  name: "Sales" # dev workspace\n\nother: keep me\n');
+    assert.strictEqual(
+      file(),
+      '# my notes\nworkspace:\n  name: "Sales" # dev workspace\n\nother: keep me\n' +
+        'notebooks:\n  upload:\n    defaultLakehouse: "replace"\n    otherLakehouses: "replace"\n    environment: "replace"\n' +
+        '  sameWorkspace:\n    defaultLakehouse: false\n    environment: false\n',
+    );
+  });
+
+  test('select adds only the notebook settings missing from an existing file, with the current values', async () => {
+    await settings().update('notebooks.upload.otherLakehouses', 'keep', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('workspace:\n  name: ""\nnotebooks:\n  upload:\n    environment: keep # mine\n');
+    t.picks.push(ws('w1', 'Sales'));
+    await t.service.select();
+    assert.strictEqual(
+      file(),
+      'workspace:\n  name: "Sales"\nnotebooks:\n  upload:\n    environment: keep # mine\n' +
+        '    defaultLakehouse: "replace"\n    otherLakehouses: "keep"\n' +
+        '  sameWorkspace:\n    defaultLakehouse: false\n    environment: false\n',
+    );
+  });
+
+  test('opening a folder copies the workspace in its settings.yaml to the user setting', async () => {
+    await settings().update('workspace.name', 'Global', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('workspace:\n  name: "Finance"\n');
+    t.service.dispose();
+    t = createService(dir);
+    assert.deepStrictEqual(await t.service.resolve(), { id: 'w2', name: 'Finance' });
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Finance');
+
+    // A folder with no workspace named leaves the setting alone.
+    await writeFile('workspace:\n  name: ""\n');
+    t.service.dispose();
+    t = createService(dir);
+    await t.service.refresh();
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Finance');
+  });
+
+  test('a change to settings.yaml made in this window is copied to the user setting', async () => {
+    await t.service.save({ name: 'Sales' });
+    await writeFile('workspace:\n  name: "Finance"\n');
+    await t.service.syncFromFile(); // not focused
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Sales');
+
+    t.service.dispose();
+    t = createService(dir, { isFocused: () => true });
+    await writeFile('workspace:\n  name: "Finance"\n');
+    await t.service.syncFromFile();
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Finance');
+    assert.deepStrictEqual(t.service.current, { name: 'Finance' });
+
+    // Blanking it clears the setting; an invalid file changes nothing.
+    await writeFile('workspace:\n  name: ""\n');
+    await t.service.syncFromFile();
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, undefined);
+    await t.service.save({ name: 'Sales' });
+    await writeFile('workspace:\n  name: "Fin\n');
+    await t.service.syncFromFile();
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Sales');
+  });
+
+  test('a change to the user setting made in this window is copied to settings.yaml, if it exists', async () => {
+    t.service.dispose();
+    t = createService(dir, { isFocused: () => true });
+    await settings().update('workspace.name', 'Sales', vscode.ConfigurationTarget.Global);
+    await t.service.syncFromSetting();
+    assert.strictEqual(file(), undefined, 'a project without settings.yaml still starts with no workspace');
+    assert.strictEqual(t.service.current, undefined);
+
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('# mine\nworkspace:\n  name: "Finance" # dev\n');
+    await t.service.syncFromSetting();
+    assert.strictEqual(file(), '# mine\nworkspace:\n  name: "Sales" # dev\n');
+    assert.deepStrictEqual(t.service.current, { name: 'Sales' });
+
+    await settings().update('workspace.name', undefined, vscode.ConfigurationTarget.Global);
+    await t.service.syncFromSetting();
+    assert.strictEqual(file(), '# mine\nworkspace:\n  name: "" # dev\n');
+    assert.strictEqual(t.service.current, undefined);
+
+    // Not focused: another window's change, so this folder's file is left alone.
+    t.service.dispose();
+    t = createService(dir);
+    await settings().update('workspace.name', 'Other', vscode.ConfigurationTarget.Global);
+    await t.service.syncFromSetting();
+    assert.strictEqual(file(), '# mine\nworkspace:\n  name: "" # dev\n');
+  });
+
+  test('notebook settings: creating .fabric-supersat writes settings.yaml with the current values, even defaults', async () => {
+    await settings().update('notebooks.upload.environment', 'keep', vscode.ConfigurationTarget.Global);
+    await settings().update('notebooks.sameWorkspace.defaultLakehouse', true, vscode.ConfigurationTarget.Global);
+    assert.strictEqual(await t.service.notebookSettings().then(() => file()), undefined, 'reading writes nothing');
+    await ensureLocalStateDir(dir); // e.g. a download creating the folder for its .ipynb
+    assert.deepStrictEqual(await t.service.notebookSettings(), {
+      upload: { ...DEFAULT_REFERENCE_SETTINGS.upload, environment: 'keep' },
+      sameWorkspace: { ...DEFAULT_REFERENCE_SETTINGS.sameWorkspace, defaultLakehouse: true },
+    });
+    assert.strictEqual(
+      file(),
+      NEW_SETTINGS_FILE.replace('environment: "replace"', 'environment: "keep"').replace(
+        'sameWorkspace:\n    defaultLakehouse: false',
+        'sameWorkspace:\n    defaultLakehouse: true',
+      ),
+    );
+    assert.strictEqual(memFs.text(`${dir.path}/.gitignore`), LOCAL_GITIGNORE);
+
+    // Changing the VS Code settings later doesn't change the file; its values win.
+    await settings().update('notebooks.upload.environment', undefined, vscode.ConfigurationTarget.Global);
+    assert.strictEqual((await t.service.notebookSettings()).upload.environment, 'keep');
+  });
+
+  test('notebook settings: an existing folder isn’t given a settings file just by using it', async () => {
+    await vscode.workspace.fs.createDirectory(dir);
+    await ensureLocalStateDir(dir);
+    assert.strictEqual(file(), undefined);
+    // Select Workspace creates it, with the notebook settings.
+    t.picks.push(ws('w1', 'Sales'));
+    await t.service.select();
+    assert.strictEqual(file(), NEW_SETTINGS_FILE.replace('name: ""', 'name: "Sales"'));
+  });
+
+  test('notebook settings: the file’s values override VS Code settings; missing ones use them', async () => {
+    await settings().update('notebooks.upload.defaultLakehouse', 'keep', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('workspace:\n  name: "Sales"\nnotebooks:\n  upload:\n    defaultLakehouse: replace # mine\n  sameWorkspace:\n    environment: true\n');
+    await settings().update('notebooks.upload.environment', 'keep', vscode.ConfigurationTarget.Global);
+    assert.deepStrictEqual(await t.service.notebookSettings(), {
+      upload: { ...DEFAULT_REFERENCE_SETTINGS.upload, environment: 'keep' },
+      sameWorkspace: { defaultLakehouse: false, environment: true },
+    });
+    assert.strictEqual(
+      file(),
+      'workspace:\n  name: "Sales"\nnotebooks:\n  upload:\n    defaultLakehouse: replace # mine\n  sameWorkspace:\n    environment: true\n',
+      'never written to on use',
+    );
+  });
+
+  test('notebook settings: an invalid value is an error naming it, and the file is left alone', async () => {
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('notebooks:\n  upload:\n    environment: swap\n');
+    await assert.rejects(t.service.notebookSettings(), /"notebooks\.upload\.environment" should be "replace" or "keep", not "swap"/);
+    await writeFile('notebooks:\n  sameWorkspace:\n    environment: yes\n');
+    await assert.rejects(t.service.notebookSettings(), /"notebooks\.sameWorkspace\.environment" should be true or false, not "yes"/);
+    assert.strictEqual(file(), 'notebooks:\n  sameWorkspace:\n    environment: yes\n');
+  });
+
+  test('notebook settings: in Restricted Mode, VS Code settings are used and nothing is written', async () => {
+    await settings().update('notebooks.upload.otherLakehouses', 'keep', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.fs.createDirectory(dir);
+    await writeFile('notebooks:\n  upload:\n    otherLakehouses: replace\n');
+    t.service.dispose();
+    t = createService(dir, { isTrusted: () => false });
+    assert.strictEqual((await t.service.notebookSettings()).upload.otherLakehouses, 'keep');
+    assert.strictEqual(file(), 'notebooks:\n  upload:\n    otherLakehouses: replace\n');
+  });
+
+  test('asks before creating .fabric-supersat; declining writes nothing', async () => {
+    const asked: string[] = [];
+    let answer = false;
+    setLocalStateDirConfirmation(async (folder) => {
+      asked.push(folder.path);
+      return answer;
+    });
+    try {
+      await assert.rejects(t.service.save({ name: 'Sales' }), LocalStateDirDeclinedError);
+      await assert.rejects(ensureLocalStateDir(dir), LocalStateDirDeclinedError, 'commands ask again');
+      assert.deepStrictEqual(asked, [dir.path, dir.path]);
+      assert.strictEqual(await vscode.workspace.fs.stat(dir).then(() => true, () => false), false);
+
+      // Background writes don't ask again once declined.
+      await assert.rejects(ensureLocalStateDir(dir, { background: true }), LocalStateDirDeclinedError);
+      assert.strictEqual(asked.length, 2);
+
+      // Writes at the same time share one question; once the folder exists, nothing is asked.
+      answer = true;
+      await Promise.all([ensureLocalStateDir(dir), ensureLocalStateDir(dir)]);
+      assert.strictEqual(asked.length, 3);
+      await t.service.save({ name: 'Sales' });
+      assert.strictEqual(asked.length, 3);
+      assert.strictEqual(memFs.text(`${dir.path}/.gitignore`), LOCAL_GITIGNORE);
+      assert.match(file() ?? '', /notebooks:/);
+    } finally {
+      setLocalStateDirConfirmation(undefined);
+    }
   });
 
   test('a file with only an ID (from an earlier version) has no workspace', async () => {
@@ -223,12 +429,12 @@ suite('WorkspaceService: folder open (local .fabric-supersat folder)', () => {
     assert.strictEqual(memFs.text(`${dir.path}/.gitignore`), 'mine\n');
   });
 
-  test('ignores user settings while a folder is open', async () => {
+  test('reads the folder’s file, not the user setting, while a folder is open; saving writes both', async () => {
     await settings().update('workspace.name', 'Global', vscode.ConfigurationTarget.Global);
     assert.strictEqual(await t.service.refresh(), undefined);
     await t.service.save({ name: 'Local' });
     assert.deepStrictEqual(t.service.current, { name: 'Local' });
-    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Global');
+    assert.strictEqual(settings().inspect('workspace.name')?.globalValue, 'Local');
   });
 
   test('picks up hand edits, including unquoted values', async () => {

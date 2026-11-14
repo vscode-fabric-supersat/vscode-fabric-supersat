@@ -121,6 +121,13 @@ suite('FabricClient: notebook definitions', () => {
     }
   });
 
+  test('listItems lists one item type in a workspace', async () => {
+    const lakehouse = { id: 'l1', displayName: 'Bronze', type: 'Lakehouse', workspaceId: 'w 1' };
+    const { c, calls } = client([json({ value: [lakehouse] })]);
+    assert.deepStrictEqual(await c.listItems('w 1', 'Lakehouse'), [lakehouse]);
+    assert.deepStrictEqual(calls, [{ method: 'GET', url: `${BASE}/workspaces/w%201/items?type=Lakehouse` }]);
+  });
+
   test('createNotebook sends the name and definition, and returns the new notebook', async () => {
     const created = { id: 'n2', displayName: 'Load', type: 'Notebook', workspaceId: 'w1' };
     const { c, calls } = client([json(created, 201)]);

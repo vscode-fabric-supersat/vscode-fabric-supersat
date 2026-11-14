@@ -83,13 +83,19 @@ src/
     fabricAuth.ts     "Sign In", "Sign Out" and "Configure Sign-In" (method, client ID, tenant) commands
     workspace.ts      "Select Workspace" command and status bar item
     notebooks.ts      notebook download/upload commands, notebook editor, sync on save
+    workspaceTools.ts "Download Workspace Metadata", "Test Notebook Formats", "Compare with Workspace"
   notebooks/
     format.ts         Fabric Git format (.py) <-> Jupyter (.ipynb) conversion (no vscode dependency)
     files.ts          a notebook's two local files, by name, and syncing them
     serializer.ts     opens src/Notebooks/<Name>/<Name>.py in the notebook editor
     transfer.ts       download and upload (by name) against the Fabric API
+    remote.ts         notebooks as they are in Fabric (fetched without writing), and header summaries
+    formatTest.ts     the format checks, their report, and replacing IDs in samples
+    references.ts     lakehouse/environment references: pointed at the target workspace's items (by name) on upload, "same workspace" on download
   workspace/
-    service.ts        current Fabric workspace, saved by name (.fabric-supersat/settings.yaml or user settings); ID looked up in Fabric, and its picker
+    metadata.ts       collects workspace metadata and renders metadata.md (no vscode dependency)
+    state.ts          per-workspace folders in .fabric-supersat/workspaces/, sync state for Upload Changed
+    service.ts        current Fabric workspace, saved by name (.fabric-supersat/settings.yaml, kept in sync with the user setting); ID looked up in Fabric; notebook settings; its picker
   util/
     config.ts         typed settings accessor
     errors.ts         error message + log helper
@@ -97,7 +103,9 @@ src/
     localState.ts     project folder, the git-ignored .fabric-supersat folder, symlink-safe write check
     base64.ts         base64 for item definition parts (desktop and web)
     yamlFile.ts       reads and updates YAML files, keeping comments and layout
-    logger.ts         shared LogOutputChannel
+    logger.ts         shared LogOutputChannel (lines also copied to .fabric-supersat/logs/)
+    diagnostics.ts    request timing, log and history files in .fabric-supersat, per-command summaries
+    concurrency.ts    runs a limited number of tasks at once, results in order
   test/
     suite/*.test.ts   tests that run on both desktop and web
     suite/memFs.ts    in-memory file system for tests that read and write files

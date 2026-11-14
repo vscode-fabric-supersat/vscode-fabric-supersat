@@ -3,6 +3,7 @@ import { AuthCancelledError, AuthError } from '../auth/types';
 import { Commands } from '../constants';
 import { FabricApiError } from '../fabric/client';
 import { WorkspaceNameError } from '../workspace/service';
+import { LocalStateDirDeclinedError } from './localState';
 import { getLogger } from './logger';
 
 const CONFIGURE = '"Fabric Supersat: Configure Sign-In"';
@@ -58,7 +59,7 @@ function fixFor(err: unknown, message: string): Fix {
 /** Logs an error and shows it to the user with buttons that lead to a fix. */
 export async function reportError(action: string, err: unknown): Promise<void> {
   const message = err instanceof Error ? err.message : String(err);
-  if (err instanceof AuthCancelledError) {
+  if (err instanceof AuthCancelledError || err instanceof LocalStateDirDeclinedError) {
     getLogger().info(`${action}: ${message}`);
     return;
   }

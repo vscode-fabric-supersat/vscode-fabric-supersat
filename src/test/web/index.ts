@@ -18,6 +18,8 @@ export async function run(): Promise<void> {
   await import('../suite/notebookFormat.test.js');
   await import('../suite/fabricNotebookApi.test.js');
   await import('../suite/notebookFiles.test.js');
+  await import('../suite/notebookReferences.test.js');
+  await import('../suite/workspaceTools.test.js');
 
   return new Promise((resolve, reject) => {
     mocha.run((failures) => {
